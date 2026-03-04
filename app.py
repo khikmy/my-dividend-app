@@ -14,11 +14,11 @@ from database import (
 )
 from utils import setup_ssl_environment, check_dividend_status
 
-# --- 1 . ページ基本設定 ---
+# --- 1.ページ基本設定 ---
 setup_ssl_environment()
 st.set_page_config(page_title="配当管理アプリ", layout="wide")
 
-# --- 2. 状態の管理 ---
+# 状態の管理
 if "page" not in st.session_state:
     st.session_state.page = "配当金ダッシュボード"
 if "pre_code" not in st.session_state:
@@ -34,14 +34,13 @@ if "list_type_val" not in st.session_state:
 if "search_reset_seed" not in st.session_state:
     st.session_state.search_reset_seed = 0
 
-# --- サイドバーメニューの処理 ---
+# --- 2.サイドバーメニュー ---
 st.sidebar.title("ナビゲーション")
-# ダッシュボードを初期ページにするなら index=0 に
 menu_options = ["配当金ダッシュボード", "保有銘柄一覧", "配当金データ登録"]
 selected_page = st.sidebar.radio("メニュー", menu_options, 
                                  index=menu_options.index(st.session_state.page) if st.session_state.page in menu_options else 0)
 
-# 画面遷移したときの処理
+# --- 画面遷移したときの処理 ---
 if selected_page != st.session_state.page:
     # もしナビゲーションから「保有銘柄一覧」に切り替えたなら、入力をクリアする
     if selected_page == "保有銘柄一覧":
@@ -74,7 +73,7 @@ def delete_confirm_dialog(item_id, ticker_name, year, month):
         if st.button("キャンセル", use_container_width=True):
             st.rerun()
     
-# --- 5-0. 【画面0】配当金ダッシュボード ---
+# --- 3.【画面1】配当金ダッシュボード ---
 if st.session_state.page == "配当金ダッシュボード":
     st.header("配当金ダッシュボード")
     df = load_data()
@@ -137,7 +136,7 @@ if st.session_state.page == "配当金ダッシュボード":
             fig.update_layout(margin=dict(t=30, b=10, l=10, r=10), height=450)
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- 2.月別配当推移（棒グラフ） ---
+            # --- 2.月別配当推移 ---
             st.subheader(f"📅 {selected_year}年 月別配当金受取額推移（{selected_type}）")
         
             # 1月〜12月のベースデータを作成（データがない月も0円として表示するため）
@@ -175,7 +174,7 @@ if st.session_state.page == "配当金ダッシュボード":
                     range=[0, y_limit],
                     tickformat=",d",
                     ticksuffix="円",
-                    title=None, # 縦軸のタイトルは非表示にする
+                    title=None,
                 ),
                 height=500,
             )
@@ -204,7 +203,7 @@ if st.session_state.page == "配当金ダッシュボード":
     else:
         st.info("データがまだありません。")
 
-# --- 5. 【画面1】保有銘柄一覧表示 ---
+# --- 4. 【画面2】保有銘柄一覧表示 ---
 elif st.session_state.page == "保有銘柄一覧":
     st.header("保有銘柄一覧")
 
@@ -213,10 +212,10 @@ elif st.session_state.page == "保有銘柄一覧":
     
     if not df.empty:
 
-        # 進行状況を表示するための「予約席」を先に作っておく
+        # 進行状況を表示するプログレスバー
         progress_area = st.empty()
         
-        # --- 最終更新日の表示
+        # 最終更新日の表示
         if not df.empty and 'updated_at' in df.columns and df['updated_at'].notnull().any():
             last_update_dt = pd.to_datetime(df['updated_at']).max()
             
@@ -328,7 +327,7 @@ elif st.session_state.page == "保有銘柄一覧":
                 currency = ticker_df['currency'].iloc[0]
                 
                 with st.expander(f"{ticker}（{t_code}）"):
-                    # --- 合計額の計算 ---
+                    # 合計額の計算
                     total_tokutei = ticker_df["amount_tokutei"].sum()
                     total_nisa = ticker_df["amount_nisa"].sum()
                     grand_total = total_tokutei + total_nisa
@@ -414,7 +413,7 @@ elif st.session_state.page == "保有銘柄一覧":
     else:
         st.info("データがまだありません。")
 
-# --- 6. 【画面2】配当金データ登録画面 ---
+# --- 5. 【画面3】配当金データ登録画面 ---
 else:
     # 編集モードか新規モードか判定
     is_edit = st.session_state.edit_data is not None
