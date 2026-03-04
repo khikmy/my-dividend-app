@@ -1,25 +1,22 @@
-import os
-# 通信ライブラリが証明書ファイルを探しに行くのを阻止し、チェックをスキップさせる
-os.environ['CURL_CA_BUNDLE'] = ""
-os.environ['SSL_CERT_FILE'] = ""
-
 import streamlit as st
-import time
 import pandas as pd
-import httpx
-import yfinance as yf
-from curl_cffi import requests as curl_requests
+import plotly.express as px
+from datetime import datetime, timedelta, timezone
+from database import (
+    load_data, 
+    delete_record, 
+    get_unique_stocks,
+    update_stock_status,
+    save_dividend_data,
+    SUPABASE_URL, 
+    HEADERS, 
+    API_URL
+)
+from utils import setup_ssl_environment, check_dividend_status
 
-# --- 1. Supabase接続設定 ---
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-
-API_URL = f"{SUPABASE_URL}/rest/v1/dividend_records"
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json; charset=utf-8",
-}
+# --- 1 . ページ基本設定 ---
+setup_ssl_environment()
+st.set_page_config(page_title="配当管理アプリ", layout="wide")
 
 # --- 2. 状態の管理 ---
 if "page" not in st.session_state:
@@ -36,9 +33,6 @@ if "list_type_val" not in st.session_state:
     st.session_state.list_type_val = "すべて"
 if "search_reset_seed" not in st.session_state:
     st.session_state.search_reset_seed = 0
-
-# --- 3. ページ基本設定 ---
-st.set_page_config(page_title="配当管理アプリ", layout="wide")
 
 # --- サイドバーメニューの処理 ---
 st.sidebar.title("ナビゲーション")
@@ -72,112 +66,13 @@ def delete_confirm_dialog(item_id, ticker_name, year, month):
     col1, col2 = st.columns(2)
     with col1:
         if st.button("はい、削除します", type="primary", use_container_width=True):
-            try:
-                with httpx.Client() as client:
-                    res = client.delete(f"{API_URL}?id=eq.{item_id}", headers=HEADERS)
-                    res.raise_for_status()
-                    st.success("削除しました")
-                    st.session_state.page = "保有銘柄一覧"
-                    st.rerun()
-            except Exception as e:
-                st.error(f"削除失敗: {e}")
+            if delete_record(item_id):
+                st.success("削除しました")
+                st.session_state.page = "保有銘柄一覧"
+                st.rerun()
     with col2:
         if st.button("キャンセル", use_container_width=True):
             st.rerun()
-
-# --- 4. データ取得関数 ---
-def load_data():
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            url = f"{SUPABASE_URL}/rest/v1/dividend_records?select=*,stocks(*)&order=year.asc,month.asc"
-            response = client.get(url, headers=HEADERS)
-            response.raise_for_status()
-            data = response.json()
-            if not data:
-                return pd.DataFrame()
-            
-            df = pd.json_normalize(data)
-
-            # stocks.ticker_codeを削除して重複回避
-            if 'stocks.ticker_code' in df.columns:
-                df = df.drop(columns=['stocks.ticker_code'])
-            
-            # 残りの stocks. を消す
-            df.columns = [c.replace('stocks.', '') for c in df.columns]
-            
-            # 数値型に変換
-            for col in ['amount_tokutei', 'amount_nisa', 'dividend_unit_jpy', 'dividend_unit_usd']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
-            return df
-    except Exception as e:
-        st.error(f"データ取得エラー: {e}")
-        return pd.DataFrame()
-    
-# --- Yahoo Finance API ---
-def check_dividend_status(ticker_code, currency):
-    from curl_cffi import requests as curl_requests
-    import yfinance as yf
-    
-    symbol = f"{ticker_code}.T" if currency == "JPY" else ticker_code
-    
-    try:
-        custom_session = curl_requests.Session()
-        custom_session.verify = False 
-        custom_session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        })
-
-        stock = yf.Ticker(symbol, session=custom_session)
-        divs = stock.dividends
-        
-        if divs.empty:
-            return "データなし", "black", "配当履歴なし"
-
-        divs.index = divs.index.tz_localize(None)
-        latest_val = divs.iloc[-1]
-        latest_date = divs.index[-1]
-        
-        target_year = latest_date.year - 1
-        target_month = latest_date.month
-        
-        prev_divs = divs[(divs.index.year == target_year) & (divs.index.month == target_month)]
-        
-        if prev_divs.empty:
-            prev_divs = divs[(divs.index.year == target_year) & 
-                             (divs.index.month >= target_month - 1) & 
-                             (divs.index.month <= target_month + 1)]
-
-        unit = "円" if currency == "JPY" else "＄"
-
-        if not prev_divs.empty:
-            prev_val = prev_divs.iloc[-1]
-            
-            # --- 増配率の計算 ---
-            if prev_val > 0:
-                change_rate = ((latest_val - prev_val) / prev_val) * 100
-                rate_str = f"({change_rate:+.1f}%)" # +10.5% のような形式
-            else:
-                rate_str = ""
-            
-            # 小数点第1位で丸める
-            p_disp = round(prev_val, 1)
-            l_disp = round(latest_val, 1)
-
-            if latest_val > prev_val:
-                return "増配", "green", f"{p_disp}{unit} → {l_disp}{unit} {rate_str}"
-            elif latest_val < prev_val:
-                return "減配", "red", f"{p_disp}{unit} → {l_disp}{unit} {rate_str}"
-            else:
-                return "維持", "gray", f"{p_disp}{unit} → {l_disp}{unit} (0.0%)"
-        else:
-            return "前年データなし", "black", f"最新: {l_disp}{unit}"
-
-    except Exception as e:
-        if "429" in str(e):
-            return "制限中 ⏳", "orange", "Yahoo制限中"
-        return "エラー", "gray", f"取得失敗"
     
 # --- 5-0. 【画面0】配当金ダッシュボード ---
 if st.session_state.page == "配当金ダッシュボード":
@@ -219,9 +114,7 @@ if st.session_state.page == "配当金ダッシュボード":
         portfolio_df = filtered_df.groupby("ticker_name")["total_jpy"].sum().reset_index()
 
         if not portfolio_df.empty:
-            # --- 1. ツリーマップ ---
-            import plotly.express as px
-            
+            # --- 1. ツリーマップ ---      
             fig = px.treemap(
                 portfolio_df,
                 path=['ticker_name'],
@@ -257,7 +150,6 @@ if st.session_state.page == "配当金ダッシュボード":
             monthly_plot_df = pd.merge(all_months, monthly_summary, on="month", how="left").fillna(0)
         
             # グラフ作成
-            import plotly.express as px
             fig_bar = px.bar(
                 monthly_plot_df, 
                 x="month", 
@@ -358,53 +250,48 @@ elif st.session_state.page == "保有銘柄一覧":
 
         with c_p4:
             if st.button("🔄 最新配当金状況を更新", use_container_width=True):
-                # 1. 銘柄リストを取得
-                with httpx.Client() as client:
-                    res = client.get(f"{SUPABASE_URL}/rest/v1/stocks", headers=HEADERS)
-                    unique_stocks = res.json()
+                # 1. まず銘柄リストを取得して変数に入れる（ここが抜けていたか、順番が逆だった可能性があります）
+                from database import get_unique_stocks
+                unique_stocks = get_unique_stocks()
                 
+                # 2. 取得できた場合のみ処理を進める
                 if unique_stocks:
                     with progress_placeholder.container():
                         progress_bar = st.progress(0)
                         status_text = st.empty()
 
-                    # 2. 日本時間を取得
+                    # 日本時間の準備
                     from datetime import datetime, timedelta, timezone
                     JST = timezone(timedelta(hours=+9))
                     target_now = datetime.now(JST).isoformat()
 
-                    # 3. 1件ずつループで確実に更新
-                    with httpx.Client() as client:
-                        for i, stock in enumerate(unique_stocks):
-                            t_code = stock['ticker_code']
-                            status_text.text(f"更新中 ({i+1}/{len(unique_stocks)})")
-                            
-                            # Yahoo Financeから最新情報を取得
-                            label, color, info = check_dividend_status(t_code, stock['currency'])
+                    for i, stock in enumerate(unique_stocks):
+                        t_code = stock['ticker_code']
+                        status_text.text(f"更新中 ({i+1}/{len(unique_stocks)}): {t_code}")
+                        
+                        # Yahoo Financeから取得
+                        label, color, info = check_dividend_status(t_code, stock['currency'])
 
-                            # 個別に PATCH 送信
-                            update_data = {
-                                "last_check_status": label,
-                                "last_check_color": color,
-                                "last_check_info": info,
-                                "updated_at": target_now
-                            }
-                            
-                            res_patch = client.patch(
-                                f"{SUPABASE_URL}/rest/v1/stocks?ticker_code=eq.{t_code}",
-                                headers=HEADERS,
-                                json=update_data
-                            )
-                            
-                            if res_patch.status_code not in [200, 201, 204]:
-                                st.error(f"エラー（{t_code}）: {res_patch.text}")
+                        # DB更新用のデータ作成
+                        update_data = {
+                            "last_check_status": label,
+                            "last_check_color": color,
+                            "last_check_info": info,
+                            "updated_at": target_now
+                        }
+                        
+                        # database.pyの関数で更新
+                        from database import update_stock_status
+                        update_stock_status(t_code, update_data)
 
-                            progress_bar.progress((i + 1) / len(unique_stocks))
+                        progress_bar.progress((i + 1) / len(unique_stocks))
                     
                     status_text.success(f"完了！ {len(unique_stocks)}銘柄を更新しました。")
                     import time
                     time.sleep(1)
                     st.rerun()
+                else:
+                    st.warning("更新対象の銘柄が見つかりませんでした。")
 
         st.divider()
 
@@ -603,26 +490,14 @@ else:
                 "amount_nisa": float(amount_n),
             }
             
-            try:
-                with httpx.Client() as client:
-                    # まず stocks テーブルを upsert (既にあれば更新、なければ挿入)
-                    client.post(
-                        f"{SUPABASE_URL}/rest/v1/stocks", 
-                        headers={**HEADERS, "Prefer": "resolution=merge-duplicates"}, 
-                        json=stock_payload
-                    )
+            success = save_dividend_data(
+                stock_payload, 
+            history_payload, 
+            is_edit, 
+            record_id=ed.get("id") if is_edit else None
+            )
 
-                    # 次に dividend_records テーブルを保存
-                    if is_edit:
-                        # 編集時は PATCH 送信（特定のIDを更新）
-                        target_id = ed["id"]
-                        res = client.patch(f"{API_URL}?id=eq.{target_id}", headers=HEADERS, json=history_payload)
-                    else:
-                        # 新規なら POST
-                        res = client.post(API_URL, headers=HEADERS, json=history_payload)
-                    
-                    res.raise_for_status() 
-                
+            if success:
                 st.success("保存しました！")
                 st.session_state.edit_data = None # 編集モード終了
                 st.session_state.pre_code = ""
@@ -630,5 +505,5 @@ else:
                 st.session_state.pre_currency = ""
                 st.session_state.page = "配当金ダッシュボード"
                 st.rerun() 
-            except Exception as e:
+            else:
                 st.error(f"保存エラー: {e}")
