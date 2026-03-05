@@ -12,6 +12,7 @@ HEADERS = {
     "Content-Type": "application/json; charset=utf-8",
 }
 
+@st.cache_data(ttl=600)  # 10分間はネットから取らずに保存したデータを使う
 def load_data():
     """Supabaseから配当データを取得し、DataFrameに整形する"""
     try:

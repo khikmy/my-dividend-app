@@ -1,4 +1,5 @@
 import os
+import streamlit as st
 import yfinance as yf
 from curl_cffi import requests as curl_requests
 
@@ -7,6 +8,7 @@ def setup_ssl_environment():
     os.environ['CURL_CA_BUNDLE'] = ""
     os.environ['SSL_CERT_FILE'] = ""
 
+@st.cache_data(ttl=3600) # 1時間は同じ結果を使い回す
 def check_dividend_status(ticker_code, currency):
     """Yahoo Financeから配当情報を取得し、増減配を判定する"""
     setup_ssl_environment()

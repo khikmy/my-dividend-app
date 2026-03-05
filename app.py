@@ -83,29 +83,56 @@ if st.session_state.page == "配当金ダッシュボード":
         df['total_jpy'] = df['amount_tokutei'] + df['amount_nisa']
         
         # --- フィルターエリア ---
-        col_f1, col_f2 = st.columns(2)
+        col_f1, col_f2, col_f3 = st.columns(3) # 3列に変更
         with col_f1:
             years = sorted(df['year'].unique(), reverse=True)
             selected_year = st.selectbox("表示する年を選択", years)
+            
         with col_f2:
-            # 銘柄タイプの選択肢を追加
             type_options = ["すべて", "日本株", "米国株"]
             selected_type = st.selectbox("銘柄タイプを選択", type_options)
+        
+        with col_f3:
+            # 銘柄タイプに基づいて選択肢を動的に変える
+            if selected_type == "日本株":
+                stock_list = df[df['currency'] == "JPY"]['ticker_name'].unique()
+            elif selected_type == "米国株":
+                stock_list = df[df['currency'] == "USD"]['ticker_name'].unique()
+            else:
+                stock_list = df['ticker_name'].unique()
+            selected_stock = st.selectbox("特定の銘柄を選択", ["すべて"] + sorted(list(stock_list)))
         
         # --- データの絞り込み ---
         # 1. 年で絞り込み
         filtered_df = df[df['year'] == selected_year]
+        base_df = df.copy()
         
         # 2. 銘柄タイプで絞り込み
         if selected_type == "日本株":
-            filtered_df = filtered_df[filtered_df['currency'] == "JPY"]
+            base_df = base_df[base_df['currency'] == "JPY"]
         elif selected_type == "米国株":
-            filtered_df = filtered_df[filtered_df['currency'] == "USD"]
+            base_df = base_df[base_df['currency'] == "USD"]
             
-        annual_total = filtered_df['total_jpy'].sum()
+        # 3. 特定銘柄の絞り込み
+        if selected_stock != "すべて":
+            base_df = base_df[base_df['ticker_name'] == selected_stock]
+            display_title = f"{selected_year}年 配当金受取額（{selected_stock}）"
+        else:
+            display_title = f"{selected_year}年 配当金受取額（{selected_type}）"
+
+        # 選択年と前年の数値を算出
+        this_year_total = base_df[base_df['year'] == selected_year]['total_jpy'].sum()
+        prev_year_total = base_df[base_df['year'] == (selected_year - 1)]['total_jpy'].sum()
+        
+        # 前年比の差分
+        diff = this_year_total - prev_year_total
         
         # サマリー表示
-        st.metric(f"{selected_year}年 {selected_type} 配当受取額", f"{annual_total:,.0f} 円")
+        st.metric(
+            label=display_title, 
+            value=f"{this_year_total:,.0f} 円",
+            delta=f"{diff:+,.0f} 円 (前年比)" if selected_year - 1 in years else None
+        )
         
         st.divider()
 
