@@ -82,60 +82,69 @@ if st.session_state.page == "配当金ダッシュボード":
         # 受取額の合計（円）を計算
         df['total_jpy'] = df['amount_tokutei'] + df['amount_nisa']
         
-        # --- フィルターエリア ---
-        col_f1, col_f2, col_f3 = st.columns(3) # 3列に変更
+        # --- 1. フィルターエリア ---
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4) 
         with col_f1:
             years = sorted(df['year'].unique(), reverse=True)
             selected_year = st.selectbox("表示する年を選択", years)
-            
         with col_f2:
+            month_options = ["すべて"] + [f"{m}月" for m in range(1, 13)]
+            selected_month_str = st.selectbox("表示する月を選択", month_options)
+        with col_f3:
             type_options = ["すべて", "日本株", "米国株"]
             selected_type = st.selectbox("銘柄タイプを選択", type_options)
-        
-        with col_f3:
+        with col_f4:
             # 銘柄タイプに基づいて選択肢を動的に変える
+            tmp_df = df.copy()
             if selected_type == "日本株":
-                stock_list = df[df['currency'] == "JPY"]['ticker_name'].unique()
+                tmp_df = tmp_df[tmp_df['currency'] == "JPY"]
             elif selected_type == "米国株":
-                stock_list = df[df['currency'] == "USD"]['ticker_name'].unique()
-            else:
-                stock_list = df['ticker_name'].unique()
-            selected_stock = st.selectbox("特定の銘柄を選択", ["すべて"] + sorted(list(stock_list)))
-        
-        # --- データの絞り込み ---
-        # 1. 年で絞り込み
-        filtered_df = df[df['year'] == selected_year]
+                tmp_df = tmp_df[tmp_df['currency'] == "USD"]
+            stock_list = sorted(tmp_df['ticker_name'].unique())
+            selected_stock = st.selectbox("特定の銘柄を選択", ["すべて"] + stock_list)
+
+        # --- 2. データの絞り込みと集計 (ここで filtered_df を確実に定義) ---
         base_df = df.copy()
         
-        # 2. 銘柄タイプで絞り込み
+        # A. 銘柄タイプで絞り込み
         if selected_type == "日本株":
             base_df = base_df[base_df['currency'] == "JPY"]
         elif selected_type == "米国株":
             base_df = base_df[base_df['currency'] == "USD"]
             
-        # 3. 特定銘柄の絞り込み
+        # B. 特定銘柄で絞り込み
         if selected_stock != "すべて":
             base_df = base_df[base_df['ticker_name'] == selected_stock]
-            display_title = f"{selected_year}年 配当金受取額（{selected_stock}）"
+            target_name = selected_stock
         else:
-            display_title = f"{selected_year}年 配当金受取額（{selected_type}）"
+            target_name = selected_type
 
-        # 選択年と前年の数値を算出
-        this_year_total = base_df[base_df['year'] == selected_year]['total_jpy'].sum()
-        prev_year_total = base_df[base_df['year'] == (selected_year - 1)]['total_jpy'].sum()
-        
-        # 前年比の差分
-        diff = this_year_total - prev_year_total
-        
-        # サマリー表示
+        # C. 比較計算用の数値算出（年・月の判定）
+        if selected_month_str != "すべて":
+            sel_m = int(selected_month_str.replace("月", ""))
+            this_val = base_df[(base_df['year'] == selected_year) & (base_df['month'] == sel_m)]['total_jpy'].sum()
+            prev_val = base_df[(base_df['year'] == selected_year - 1) & (base_df['month'] == sel_m)]['total_jpy'].sum()
+            display_title = f"{selected_year}年{sel_m}月 配当金受取額（{target_name}）"
+            delta_label = "前年同月比"
+            # グラフ・表用データも月で絞る
+            filtered_df = base_df[(base_df['year'] == selected_year) & (base_df['month'] == sel_m)]
+        else:
+            this_val = base_df[base_df['year'] == selected_year]['total_jpy'].sum()
+            prev_val = base_df[base_df['year'] == selected_year - 1]['total_jpy'].sum()
+            display_title = f"{selected_year}年 配当金受取額（{target_name}）"
+            delta_label = "前年比"
+            # グラフ・表用データは年全件
+            filtered_df = base_df[base_df['year'] == selected_year]
+
+        # --- 3. 指標の表示 ---
+        diff = this_val - prev_val
         st.metric(
             label=display_title, 
-            value=f"{this_year_total:,.0f} 円",
-            delta=f"{diff:+,.0f} 円 (前年比)" if selected_year - 1 in years else None
+            value=f"{this_val:,.0f} 円",
+            delta=f"{diff:+,.0f} 円 ({delta_label})" if selected_year - 1 in years else None
         )
-        
-        st.divider()
 
+        # --- 4. グラフ描画 (ここで filtered_df を使用) ---
         # 銘柄ごとに集計
         portfolio_df = filtered_df.groupby("ticker_name")["total_jpy"].sum().reset_index()
 
@@ -225,7 +234,7 @@ if st.session_state.page == "配当金ダッシュボード":
                 use_container_width=True
             )
         else:
-            st.info(f"該当するデータ（{selected_year}年 / {selected_type}）はまだありません。")
+            st.info(f"該当するデータはありません。")
 
     else:
         st.info("データがまだありません。")
@@ -293,7 +302,7 @@ elif st.session_state.page == "保有銘柄一覧":
 
                     for i, stock in enumerate(unique_stocks):
                         t_code = stock['ticker_code']
-                        status_text.text(f"更新中 ({i+1}/{len(unique_stocks)}): {t_code}")
+                        status_text.text(f"更新中 ({i+1}/{len(unique_stocks)})")
                         
                         # Yahoo Financeから取得
                         label, color, info = check_dividend_status(t_code, stock['currency'])
