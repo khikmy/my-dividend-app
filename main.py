@@ -11,6 +11,7 @@ pages = {
         st.Page("pages/dashboard.py", title="配当金ダッシュボード", default=True),
         st.Page("pages/stockList.py", title="保有銘柄一覧"),
         st.Page("pages/dividendRegistration.py", title="配当金データ登録"),
+        st.Page("pages/foreignCurrencyList.py", title="保有外貨一覧"),
     ]
 }
 

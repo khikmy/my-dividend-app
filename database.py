@@ -1,6 +1,16 @@
 import streamlit as st
 import httpx
 import pandas as pd
+import ssl
+
+def setup_ssl_environment():
+    """SSL証明書のエラーを回避するための設定"""
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
 
 # --- Supabase接続設定 ---
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -106,3 +116,55 @@ def get_unique_stocks():
     except Exception as e:
         st.error(f"銘柄リスト取得失敗: {e}")
         return []
+    
+# --- 外貨資産(foreignCurrency_records)用の設定 ---
+FOREX_API_URL = f"{SUPABASE_URL}/rest/v1/foreignCurrency_records"
+
+def load_forex_data():
+    """外貨資産データを取得する"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            # 取得
+            res = client.get(f"{FOREX_API_URL}?select=*", headers=HEADERS)
+            res.raise_for_status()
+            data = res.json()
+            if not data:
+                return pd.DataFrame(columns=['通貨', '保有金額'])
+            
+            df = pd.DataFrame(data)
+            return df.rename(columns={"currency": "通貨", "amount": "保有金額"})
+    except Exception as e:
+        st.error(f"外貨データ取得エラー: {e}")
+        return pd.DataFrame(columns=['通貨', '保有金額'])
+
+def save_forex_data(currency, amount):
+    """外貨資産を保存・更新(upsert)する"""
+    try:
+        payload = {
+            "currency": currency,
+            "amount": amount,
+            "updated_at": "now()"
+        }
+        with httpx.Client() as client:
+            # Preferヘッダーで重複時は更新(upsert)を指定
+            res = client.post(
+                FOREX_API_URL,
+                headers={**HEADERS, "Prefer": "resolution=merge-duplicates"},
+                json=payload
+            )
+            res.raise_for_status()
+            return True
+    except Exception as e:
+        st.error(f"外貨保存エラー: {e}")
+        return False
+
+def delete_forex_data(currency):
+    """指定した通貨を削除する"""
+    try:
+        with httpx.Client() as client:
+            res = client.delete(f"{FOREX_API_URL}?currency=eq.{currency}", headers=HEADERS)
+            res.raise_for_status()
+            return True
+    except Exception as e:
+        st.error(f"外貨削除エラー: {e}")
+        return False
