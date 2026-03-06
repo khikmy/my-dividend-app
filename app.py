@@ -221,8 +221,64 @@ if st.session_state.page == "配当金ダッシュボード":
             )
         
             st.plotly_chart(fig_bar, use_container_width=True)
+            
+            # --- 3. 増配・減配のステータス集計 ---
+            st.subheader("📈 銘柄別 配当ステータス")
 
-            # --- 3. ランキング表 ---
+            # 1. 判定用の箱
+            inc_count = 0
+            stay_count = 0
+            dec_count = 0
+            new_count = 0
+
+            # 当年の全銘柄を取得
+            this_year_names = filtered_df['ticker_name'].unique()
+            
+            # 前年全体のデータを取得
+            prev_year_df = base_df[base_df['year'] == selected_year - 1]
+
+            # 2. 今年の全銘柄をループして判定
+            for stock in this_year_names:
+                # 今年のデータから最大単価を取得
+                stock_this_df = filtered_df[filtered_df['ticker_name'] == stock]
+                currency = stock_this_df['currency'].iloc[0]
+                
+                # 通貨によって参照する列を切り替える
+                unit_col = 'dividend_unit_jpy' if currency == 'JPY' else 'dividend_unit_usd'
+                
+                t_val = stock_this_df[unit_col].max()
+
+                # 前年のデータがあるか確認
+                stock_prev_df = prev_year_df[prev_year_df['ticker_name'] == stock]
+                
+                if not stock_prev_df.empty:
+                    p_val = stock_prev_df[unit_col].max()
+                    
+                    if t_val > p_val:
+                        inc_count += 1
+                    elif t_val < p_val:
+                        dec_count += 1
+                    else:
+                        stay_count += 1
+                else:
+                    # 前年にデータがない場合は新規
+                    new_count += 1
+
+            # --- 表示エリア ---
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("増配 🟢", f"{inc_count} 銘柄")
+            with c2:
+                st.metric("減配 🔴", f"{dec_count} 銘柄")
+            with c3:
+                st.metric("維持 ⚪", f"{stay_count} 銘柄")
+            with c4:
+                st.metric("新規 ✨", f"{new_count} 銘柄")
+
+            st.caption(f"※ {selected_year}年と前年の最大配当単価（{selected_type}）を比較しています")
+            st.divider()
+
+            # --- 4. ランキング表 ---
             st.subheader(f"🏆 {selected_year}年 配当金受取額ランキング（{selected_type}）")
             # 金額が大きい順に並び替え、上位10件のみ抽出
             ranking_df = portfolio_df.sort_values("total_jpy", ascending=False).head(10)
