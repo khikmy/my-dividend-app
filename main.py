@@ -10,7 +10,7 @@ pages = {
         # default=True をつけることで、リロード時にこのページが初期表示される
         st.Page("pages/dashboard.py", title="配当金ダッシュボード", default=True),
         st.Page("pages/stockList.py", title="保有銘柄一覧"),
-        st.Page("pages/registration.py", title="配当金データ登録"),
+        st.Page("pages/dividendRegistration.py", title="配当金データ登録"),
     ]
 }
 

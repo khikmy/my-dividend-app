@@ -8,7 +8,7 @@ initial_states = {
     "pre_code": "",
     "pre_name": "",
     "pre_currency": "JPY",  # エラーが出ていた変数
-    "page": "registration"
+    "page": "dividendRegistration.py"
 }
 
 for key, value in initial_states.items():
@@ -64,4 +64,4 @@ with st.form("dividend_entry_form", clear_on_submit=not is_edit):
             st.success("保存しました！")
             st.session_state.edit_data = None
             st.session_state.pre_code = st.session_state.pre_name = st.session_state.pre_currency = ""
-            st.switch_page("pages/配当金ダッシュボード.py")
+            st.switch_page("pages/dividendRegistration.py")

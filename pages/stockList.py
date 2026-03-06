@@ -119,7 +119,7 @@ if not df.empty:
                 with col_b1:
                     if st.button(f"➕ 配当金データを追加する", key=f"add_{t_code}"):
                         st.session_state.pre_code, st.session_state.pre_name, st.session_state.pre_currency = t_code, ticker, currency
-                        st.switch_page("pages/registration.py")
+                        st.switch_page("pages/dividendRegistration.py")
                 with col_b2:
                     db_status = ticker_df['last_check_status'].iloc[0] if 'last_check_status' in ticker_df.columns else None
                     if db_status:
@@ -135,7 +135,7 @@ if not df.empty:
                     r[2].write(f"{u_val}"); r[3].write(f"{r_data['shares_tokutei']}"); r[4].write(f"{r_data['amount_tokutei']:,.0f}"); r[5].write(f"{r_data['shares_nisa']}"); r[6].write(f"{r_data['amount_nisa']:,.0f}")
                     if r[7].button("📝", key=f"edit_{r_data['id']}"):
                         st.session_state.edit_data = r_data.to_dict()
-                        st.switch_page("pages/registration.py")
+                        st.switch_page("pages/dividendRegistration.py")
                     if r[8].button("🗑️", key=f"del_{r_data['id']}"):
                         delete_confirm_dialog(r_data['id'], ticker, r_data['year'], r_data['month'])
     else:
