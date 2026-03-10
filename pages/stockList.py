@@ -94,7 +94,7 @@ def show_dividend_dialog(edit_data=None):
                     st.session_state.pre_code = st.session_state.pre_name = st.session_state.pre_currency = ""
                     st.rerun()
 
-st.subheader("保有銘柄一覧")
+st.header("保有銘柄一覧")
 
 top_info_container = st.empty()
 

@@ -171,3 +171,55 @@ def delete_forex_data(currency):
     except Exception as e:
         st.error(f"外貨削除エラー: {e}")
         return False
+
+# --- 4. 税金シミュレーション関連 ---
+
+# テーブルのURLを追加
+TAX_API_URL = f"{SUPABASE_URL}/rest/v1/tax_simulations"
+
+def save_tax_simulation(tax_payload):
+    """税金シミュレーションデータを年度ごとに保存・更新する (UPSERT)"""
+    try:
+        with httpx.Client() as client:
+            # 重複時に上書きするためのクエリパラメータを追加
+            # year列をキーにして競合を解決するよう明示
+            upsert_url = f"{TAX_API_URL}?on_conflict=year"
+            
+            # ヘッダーに resolution=merge-duplicates を含める
+            # これがないと POST はただの INSERT として動いてしまいます
+            headers = {
+                **HEADERS,
+                "Prefer": "resolution=merge-duplicates"
+            }
+            
+            res = client.post(
+                upsert_url,
+                headers=headers,
+                json=tax_payload,
+                timeout=10.0
+            )
+            
+            # 成功時: 201(新規作成) または 204(更新成功/No Content)
+            if res.status_code not in [200, 201, 204]:
+                st.error(f"税金データ保存失敗: {res.text}")
+                return False
+            return True
+    except Exception as e:
+        st.error(f"税金保存エラー: {e}")
+        return False
+
+def load_tax_simulation(year):
+    """指定した年度の税金データを取得する"""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            # クエリパラメータで年度を絞り込み
+            url = f"{TAX_API_URL}?year=eq.{year}&select=*"
+            res = client.get(url, headers=HEADERS)
+            res.raise_for_status()
+            data = res.json()
+            
+            # データがあれば最初の1件を、なければNoneを返す
+            return data[0] if data else None
+    except Exception as e:
+        # 初回起動時などデータがない場合もあるため、エラー表示は控えめに
+        return None

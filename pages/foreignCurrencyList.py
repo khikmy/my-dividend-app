@@ -97,7 +97,7 @@ def show_input_dialog(default_country="アメリカ (USD)"):
 
 # --- 3. メインUI表示 ---
 
-st.subheader("保有外貨一覧")
+st.header("保有外貨一覧")
 
 # 最上部コンテナ（進捗バー等が表示される場所）
 top_info_container = st.empty()
