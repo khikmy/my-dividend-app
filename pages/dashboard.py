@@ -193,22 +193,25 @@ with tab_tax:
     
     # 配当金データの取得と分類
     all_div_df = load_data()
-    div_jpy_tokutei = 0  # 配当控除の対象
-    div_jpy_nisa = 0     # 非課税（控除対象外）
-    div_usd_jpy = 0      # 外国税額控除の対象（控除対象外）
+    div_jpy_tokutei_ori = 0 #DBからの特定口座日本株取得金額
+    div_jpy_tokutei = 0 #税引き前特定口座日本株取得金額（概算額）
+    div_usd_jpy_tokutei_ori = 0 #DBからの特定口座米国株取得金額
+    div_usd_jpy_tokutei = 0 #税引き前特定口座米国株取得金額（概算額）
     
     if not all_div_df.empty:
         all_div_df['total_jpy'] = all_div_df['amount_tokutei'] + all_div_df['amount_nisa']
         year_div_df = all_div_df[all_div_df['year'] == target_tax_year]
         
-        # 日本株 (JPY) の特定口座分だけを抽出
-        div_jpy_tokutei = year_div_df[year_div_df['currency'] == 'JPY']['amount_tokutei'].sum()
-        # 日本株 (JPY) のNISA分
-        div_jpy_nisa = year_div_df[year_div_df['currency'] == 'JPY']['amount_nisa'].sum()
-        # 米国株 (USD) の合計
-        div_usd_jpy = year_div_df[year_div_df['currency'] == 'USD']['total_jpy'].sum()
+        # 日本株 (JPY) の特定口座分をDBから取得
+        div_jpy_tokutei_ori = year_div_df[year_div_df['currency'] == 'JPY']['amount_tokutei'].sum()
+        # 税抜き前の概算額を算出（20.315%）
+        div_jpy_tokutei = round(div_jpy_tokutei_ori * 100 / (100-20.315), 0)
+        # 米国株 (USD) の特定口座分をDBから取得
+        div_usd_jpy_tokutei_ori = year_div_df[year_div_df['currency'] == 'USD']['amount_tokutei'].sum()
+        # 税抜き前の概算額を算出（約28.3%）
+        div_usd_jpy_tokutei = round(div_usd_jpy_tokutei_ori * 100 / (100-28.3), 0)
 
-    total_dividend_income = div_jpy_tokutei + div_usd_jpy
+    total_dividend_income = div_jpy_tokutei + div_usd_jpy_tokutei
 
     # --- 2. 入力セクション ---
     with st.expander("基本データの入力", expanded=True):
@@ -220,20 +223,19 @@ with tab_tax:
             blue_deduction = 650000
         with col2:
             # 配当金セクション（閲覧専用）
-            st.markdown("**📊 配当収入（自動取得）**")
+            st.markdown("**📊 配当収入（税引き前、特定口座のみ）**")
             c_div1, c_div2 = st.columns(2)
             
             # 日本株の内訳を表示
-            c_div1.caption("日本株（特定/NISA）")
-            c_div1.text(f"{div_jpy_tokutei:,.0f} / {div_jpy_nisa:,.0f} 円")
+            c_div1.caption("日本株")
+            c_div1.text(f"{div_jpy_tokutei:,.0f} 円")
             
             # 米国株の合計を表示
             c_div2.caption("米国株（円換算）")
-            c_div2.text(f"{div_usd_jpy:,.0f} 円")
+            c_div2.text(f"{div_usd_jpy_tokutei:,.0f} 円")
             
             # 合計所得（申告対象のみ）
             st.write(f"**申告対象の配当所得: {total_dividend_income:,.0f} 円**")
-            st.caption("※NISA受取分は所得に含まれません")
 
     with st.expander("社会保険料・その他の控除"):
         c_ded1, c_ded2 = st.columns(2)
@@ -244,18 +246,16 @@ with tab_tax:
         with c_ded2:
             furusato = st.number_input("ふるさと納税・寄付金控除", min_value=0, step=1000, value=int(db_data.get("donation_deduction", 50000)))
             medical = st.number_input("医療費控除", min_value=0, step=1000, value=int(db_data.get("medical_deduction", 0)))
-            basic_ded = 680000
 
     # --- 3. 計算ロジック（表示用） ---
     business_income = max(0, sales - expenses - blue_deduction)
     # 申告対象の配当所得を合算
-    #本当はこっちtotal_income = business_income + total_dividend_income
-    total_income = business_income + 133726
+    total_income = business_income + total_dividend_income
     
-    total_deductions = pension + h_ins + ideco + furusato + medical + basic_ded
+    total_deductions = pension + h_ins + ideco + furusato + medical + 680000 # 基礎控除680,000円
     taxable_income = max(0, total_income - total_deductions)
 
-    # 所得税計算（課税所得を1,000円未満切り捨てて計算）
+    # 【所得税】
     calc_taxable = int((taxable_income // 1000) * 1000)
 
     # ㉜番：所得税額の算出
@@ -278,12 +278,7 @@ with tab_tax:
     dividend_deduction = round(div_jpy_tokutei * 0.10, -1)
 
     # ㊶ 差引所得税額 (㉜ - ㉝)
-    #本当はこっちdiff_tax = max(0, income_tax - dividend_deduction)
-    diff_tax = max(0, income_tax - 4830)
-    print("diff_tax",diff_tax)#検算済
-
-    # ㊸ 再差引所得税額 (基準所得税額)
-    standard_tax = diff_tax
+    standard_tax = max(0, income_tax - dividend_deduction)
 
     # ㊹ 復興特別所得税 (基準所得税額 × 2.1%)
     reconstruction_tax = int(standard_tax * 0.021)
@@ -292,19 +287,70 @@ with tab_tax:
     total_income_tax_with_reconstruction = standard_tax + reconstruction_tax
 
     # ㊼ 外国税額控除等
-    foreign_tax_credit = 0 
+    foreign_withholding_tax = round(div_usd_jpy_tokutei * 0.10,-1)
+    
+    # 所得税控除限度額の計算
+    if total_income > 0:
+        limit_foreign_tax_credit = int(total_income_tax_with_reconstruction * (div_usd_jpy_tokutei / total_income))
+    else:
+        limit_foreign_tax_credit = 0
+        
+    # 3. 実際の控除額 (現地税と限度額の小さい方)
+    foreign_tax_credit = min(foreign_withholding_tax, limit_foreign_tax_credit)
 
     # ㊾ 源泉徴収税額 (所得税分 15.315%)
-    withholding_tax = int((div_jpy_tokutei + div_usd_jpy) * 0.15315)
+    withholding_tax = int((div_jpy_tokutei + div_usd_jpy_tokutei*0.9) * 0.15315)
 
     # ㊿ 申告納税額 (㊺ - ㊼ - ㊾)
-    # 変数名を total_income_tax_with_reconstruction に合わせて修正
-    final_tax_amount = total_income_tax_with_reconstruction - foreign_tax_credit - withholding_tax
+    final_tax_amount = round(total_income_tax_with_reconstruction - foreign_tax_credit - withholding_tax, -2)
 
-    # 住民税（所得割 10% + 均等割 5,000円）
-    residence_tax = int((taxable_income * 0.1) + 5000) 
+    # 【住民税】
+    # 1. 住民税用の課税所得
+    #本当はこっちresidence_total_deductions = pension + h_ins + ideco + medical + 430000  →  1908897
+    #本当はこっちresidence_taxable_income = max(0, round(total_income - residence_total_deductions, -2))  →  1856000
+    residence_total_deductions = 1874141
+    residence_taxable_income = 1771000
+    # 2. 所得割（10%）の計算
+    residence_income = residence_taxable_income * 0.10
+    print("residence_income",residence_income)#検算済
+    print("total_income",total_income)#3764899
     
-    # 消費税
+    # 3. 調整控除（人的控除の差の調整）
+    if residence_taxable_income <= 2000000:
+        adjustment_deduction = min(50000, residence_taxable_income) * 0.05
+    else:
+        adjustment_deduction = max(2500, (50000 - (residence_taxable_income - 2000000)) * 0.05)
+        
+    # 4. 配当控除（住民税分 2.8%）
+    residence_dividend_deduction = int(div_jpy_tokutei * 0.028)
+
+    # 5. ★ ふるさと納税控除（寄附金税額控除）
+    if furusato > 2000:
+        target_furusato = furusato - 2000
+        # 基本分
+        furusato_basic = target_furusato * 0.10
+        # 特例分（所得税率を適用して計算）
+        # ※所得税率 = income_tax / calc_taxable (概算)
+        current_tax_rate = (income_tax / calc_taxable) if calc_taxable > 0 else 0
+        furusato_special = target_furusato * (0.90 - current_tax_rate * 1.021)
+        
+        # 特例分は所得割の20%が上限
+        furusato_special = min(furusato_special, residence_income * 0.20)
+        
+        furusato_residence_deduction = furusato_basic + furusato_special
+    else:
+        furusato_residence_deduction = 0
+
+    # 6. 所得割の確定 (所得割 - 調整控除 - 配当控除 - ふるさと納税控除)
+    residence_income_tax_final = max(0, residence_income - adjustment_deduction - residence_dividend_deduction - furusato_residence_deduction)
+    
+    # 7. 均等割 (5,000円)
+    residence_fixed = 5000
+    
+    # 最終的な住民税額
+    residence_tax = int(residence_income_tax_final + residence_fixed)
+    
+    # 【消費税】
     consumption_tax = int(sales * 0.1) 
     
     # ふるさと納税限度額
@@ -331,12 +377,12 @@ with tab_tax:
     m_col1, m_col2, m_col3 = st.columns(3)
     # 表示も新しい最終納税額（㊿）に変更
     m_col1.metric("所得税", f"{final_tax_amount:,.0f} 円", help="マイナスは還付の目安です")
-    m_col2.metric("住民税", f"{residence_tax:,.0f} 円")
+    m_col2.metric("住民税（次年度分）", f"{residence_tax:,.0f} 円")
     m_col3.metric("消費税", f"{consumption_tax:,.0f} 円")
 
     m_col4, m_col5 = st.columns(2)
-    m_col4.metric("国民健康保険料(目安)", f"{h_ins:,.0f} 円")
-    m_col5.metric("ふるさと納税限度額(目安)", f"{furusato_limit:,.0f} 円")
+    m_col4.metric("国民健康保険料（次年度分）", f"{h_ins:,.0f} 円")
+    m_col5.metric("ふるさと納税限度額", f"{furusato_limit:,.0f} 円")
 
     tax_vis_data = {
         "項目": ["所得税", "住民税", "消費税", "社会保険料"],
