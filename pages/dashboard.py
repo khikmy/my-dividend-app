@@ -306,21 +306,18 @@ with tab_tax:
 
     # 【住民税】
     # 1. 住民税用の課税所得
-    #本当はこっちresidence_total_deductions = pension + h_ins + ideco + medical + 430000  →  1908897
-    #本当はこっちresidence_taxable_income = max(0, round(total_income - residence_total_deductions, -2))  →  1856000
-    residence_total_deductions = 1874141
-    residence_taxable_income = 1771000
+    residence_total_deductions = pension + h_ins + ideco + medical + 430000
+    residence_taxable_income = max(0, round(total_income - residence_total_deductions, -2))
+    
     # 2. 所得割（10%）の計算
     residence_income = residence_taxable_income * 0.10
-    print("residence_income",residence_income)#検算済
-    print("total_income",total_income)#3764899
     
     # 3. 調整控除（人的控除の差の調整）
     if residence_taxable_income <= 2000000:
         adjustment_deduction = min(50000, residence_taxable_income) * 0.05
     else:
         adjustment_deduction = max(2500, (50000 - (residence_taxable_income - 2000000)) * 0.05)
-        
+
     # 4. 配当控除（住民税分 2.8%）
     residence_dividend_deduction = int(div_jpy_tokutei * 0.028)
 
