@@ -3,6 +3,14 @@ import pandas as pd
 import plotly.express as px
 from database import load_data, load_forex_data, load_tax_simulation, save_tax_simulation
 
+@st.cache_data
+def get_cached_all_data():
+    return load_data()
+
+@st.cache_data
+def get_cached_forex():
+    return load_forex_data()
+
 st.set_page_config(page_title="配当金ダッシュボード", layout="wide")
 
 tab_div, tab_forex, tab_tax = st.tabs(["💵 配当金", "🌍 保有外貨", "🧾 税金シミュレーション"])
@@ -75,11 +83,23 @@ with tab_div:
         # --- 3. 指標の表示 ---
         diff = this_val - prev_val
         
-        st.metric(
-            label=display_title, 
-            value=f"{this_val:,.0f} 円",
-            delta=f"{diff:+,.0f} 円 ({delta_label})" if selected_year - 1 in years else None
-        )
+        # 前年比のテキストと色を決定
+        delta_color = "#ff4b4b" if diff < 0 else "#09ab3b" # 赤 or 緑
+        delta_icon = "↓" if diff < 0 else "↑"
+        delta_text = f"{delta_icon} {diff:+,.0f} 円 ({delta_label})" if int(selected_year) - 1 in years else ""
+
+        # Markdownでタイトル、金額、前年比を一気に描画
+        st.markdown(f"""
+            <div style="margin-bottom: -10px;">
+                <h3 style="margin-bottom: 0px;">{display_title}</h3>
+                <div style="display: flex; align-items: baseline; gap: 15px;">
+                    <span style="font-size: 2.5rem;">{this_val:,.0f} <small style="font-size: 1.5rem;">円</small></span>
+                    <span style="color: {delta_color}; font-size: 1.1rem; font-weight: 500;">{delta_text}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("") # 下に少しだけスペースを空ける
         
         # --- 4. グラフ描画 ---
         portfolio_df = filtered_df.groupby("ticker_name")["total_jpy"].sum().reset_index()
@@ -111,27 +131,70 @@ with tab_div:
             # --- 5. ステータス集計 ---
             st.subheader("🚥 配当金ステータス状況")
             inc_count, stay_count, dec_count, new_count = 0, 0, 0, 0
-            this_year_names = filtered_df['ticker_name'].unique()
-            prev_year_df = base_df[base_df['year'] == selected_year - 1]
-            for stock in this_year_names:
-                stock_this_df = filtered_df[filtered_df['ticker_name'] == stock]
-                currency = stock_this_df['currency'].iloc[0]
+            
+            # 【重要】現在画面でフィルタリングされている銘柄のみを対象にする
+            # (銘柄タイプや特定銘柄の選択がすでに反映された filtered_df を使用)
+            this_year_filtered_names = filtered_df['ticker_name'].unique()
+            
+            for stock in this_year_filtered_names:
+                stock_this_year_data = filtered_df[filtered_df['ticker_name'] == stock]
+                
+                if selected_month_str == "すべて":
+                    target_month = int(stock_this_year_data['month'].max())
+                else:
+                    target_month = int(selected_month_str.replace("月", ""))
+                
+                this_month_data = stock_this_year_data[stock_this_year_data['month'] == target_month]
+                if this_month_data.empty:
+                    continue
+                
+                currency = this_month_data['currency'].iloc[0]
                 unit_col = 'dividend_unit_jpy' if currency == 'JPY' else 'dividend_unit_usd'
-                t_val = stock_this_df[unit_col].max()
-                stock_prev_df = prev_year_df[prev_year_df['ticker_name'] == stock]
-                if not stock_prev_df.empty:
-                    p_val = stock_prev_df[unit_col].max()
-                    if t_val > p_val: inc_count += 1
-                    elif t_val < p_val: dec_count += 1
-                    else: stay_count += 1
-                else: new_count += 1
+                t_val = this_month_data[unit_col].max()
+                
+                # --- 前年データの探索 (同月 -> 前月 -> 次月の順) ---
+                prev_year = int(selected_year) - 1
+                
+                # 候補となる月リスト [ターゲット月, 前の月, 次の月]
+                # 1月の前は12月、12月の次は1月になるよう調整
+                months_to_check = [
+                    target_month, 
+                    12 if target_month == 1 else target_month - 1, 
+                    1 if target_month == 12 else target_month + 1
+                ]
+                
+                found_prev = False
+                for m in months_to_check:
+                    stock_prev_df = base_df[
+                        (base_df['year'] == prev_year) & 
+                        (base_df['ticker_name'] == stock) & 
+                        (base_df['month'] == m)
+                    ]
+                    
+                    if not stock_prev_df.empty:
+                        p_val = stock_prev_df[unit_col].max()
+                        if t_val > p_val: inc_count += 1
+                        elif t_val < p_val: dec_count += 1
+                        else: stay_count += 1
+                        found_prev = True
+                        break # 見つかったらループ終了
+                
+                if not found_prev:
+                    new_count += 1
 
+            # メトリック表示
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("増配 🟢", f"{inc_count} 銘柄")
             c2.metric("減配 🔴", f"{dec_count} 銘柄")
             c3.metric("維持 ⚪", f"{stay_count} 銘柄")
             c4.metric("新規 ✨", f"{new_count} 銘柄")
-            st.caption(f"※ {selected_year}年と前年の最大配当単価（{selected_type}）を比較しています")
+            
+            # キャプションを動的に変更
+            if selected_month_str == "すべて":
+                caption_text = f"※ 各銘柄の{selected_year}年最新配当月と、その前年同月を比較"
+            else:
+                caption_text = f"※ 各銘柄の{selected_year}年{target_month}月と、前年同月を比較"
+            st.caption(f"対象：{target_name} / {caption_text}")
 
             st.subheader(f"🏆 {selected_year}年 配当金受取額ランキング（{selected_type}）")
             ranking_df = portfolio_df.sort_values("total_jpy", ascending=False).head(10)
@@ -159,7 +222,15 @@ with tab_forex:
         total_forex_jpy = df_forex['jpy'].sum()
 
         # --- 2. メトリック表示 ---
-        st.metric("保有外貨総額 (円換算)", f"{total_forex_jpy:,.0f} 円")
+        st.markdown(f"""
+            <div style="margin-bottom: 20px;">
+                <h3 style="margin-bottom: 0px;">保有外貨総額 (円換算)</h3>
+                <div style="display: flex; align-items: baseline; gap: 10px;">
+                    <span style="font-size: 2.5rem;">{total_forex_jpy:,.0f}</span>
+                    <span style="font-size: 1.2rem; font-weight: 500;">円</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
         
         # --- 3. グラフ表示（詳細テーブルを削除し、グラフをメインに） ---
         fig_pie = px.pie(
@@ -255,7 +326,7 @@ with tab_tax:
                 medical = st.number_input("医療費控除", min_value=0, step=1000, value=int(db_data.get("medical_deduction", 0)))
 
         # フォーム内の送信ボタン（これが押されるまで再読み込みしません）
-        submit_button = st.form_submit_button(f"📅 {target_tax_year}年度のデータを計算して保存", use_container_width=True)
+        submit_button = st.form_submit_button(f"📅 {target_tax_year}年度のデータを保存", use_container_width=True)
 
     # --- 3. 計算ロジック & 保存処理 ---
     # ボタンが押されたとき、または初回読み込み時に計算を実行
@@ -348,9 +419,3 @@ with tab_tax:
     m_col4, m_col5 = st.columns(2)
     m_col4.metric("国民健康保険料（次年度分）", f"{h_ins:,.0f} 円")
     m_col5.metric("ふるさと納税限度額", f"{furusato_limit:,.0f} 円")
-
-    tax_vis_data = {
-        "項目": ["所得税", "住民税", "消費税", "社会保険料"],
-        "金額": [total_income_tax_with_reconstruction, residence_tax, consumption_tax, pension + h_ins]
-    }
-    st.plotly_chart(px.bar(tax_vis_data, x="項目", y="金額", color="項目", title="支払うべき公租公課の内訳"), use_container_width=True)
