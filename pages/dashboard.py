@@ -325,18 +325,27 @@ with tab_tax:
                 furusato = st.number_input("ふるさと納税・寄付金控除", min_value=0, step=1000, value=int(db_data.get("donation_deduction", 50000)))
                 medical = st.number_input("医療費控除", min_value=0, step=1000, value=int(db_data.get("medical_deduction", 0)))
 
-        # フォーム内の送信ボタン（これが押されるまで再読み込みしません）
+        # フォーム内の送信ボタン
         submit_button = st.form_submit_button(f"📅 {target_tax_year}年度のデータを保存", use_container_width=True)
 
     # --- 3. 計算ロジック & 保存処理 ---
-    # ボタンが押されたとき、または初回読み込み時に計算を実行
+    # --- 3-1. 所得の算出 ---
+    # 2024年は従来の48万、2025年以降は改正後の68万（仮定）を基礎控除として設定
+    basic_deduction = 480000 if target_tax_year == 2024 else 680000
+    # 事業所得の計算（売上 - 経費 - 青色申告特別控除65万） ※0未満にはならない
     business_income = max(0, sales - expenses - blue_deduction)
+    # 総所得金額の算出（事業所得 + 配当所得）
     total_income = business_income + total_dividend_income
     
-    total_deductions = pension + h_ins + ideco + furusato + medical + 680000 
+    # --- 3-2. 所得控除の集計と課税所得の決定 ---
+    # 各種保険料やiDeCo、寄付金に基礎控除を合算
+    total_deductions = pension + h_ins + ideco + furusato + medical + basic_deduction 
+    # 課税される所得金額を算出（1,000円未満切り捨て）
     taxable_income = max(0, total_income - total_deductions)
     calc_taxable = int((taxable_income // 1000) * 1000)
 
+    # --- 3-3. 所得税額の計算（超過累進税率の適用） ---
+    # 所得に応じた税率（5%〜45%）を適用し、控除額を差し引く
     if calc_taxable <= 1950000:
         income_tax = int(calc_taxable * 0.05)
     elif calc_taxable <= 3300000:
@@ -352,11 +361,19 @@ with tab_tax:
     else:
         income_tax = int((calc_taxable * 0.45) - 4796000)
 
+    # --- 3-4. 税額控除の適用 ---
+    # 配当控除：国内株配当がある場合、所得税額から10%を控除
     dividend_deduction = round(div_jpy_tokutei * 0.10, -1)
     standard_tax = max(0, income_tax - dividend_deduction)
+    # 復興特別所得税（所得税額の2.1%）を加算
     reconstruction_tax = int(standard_tax * 0.021)
-    total_income_tax_with_reconstruction = standard_tax + reconstruction_tax
+    total_income_tax_pre_cut = standard_tax + reconstruction_tax
 
+     # 【特例】定額減税（2024年度のみ30,000円を税額から直接マイナス）
+    teigaku_genzei_tax = 30000 if target_tax_year == 2024 else 0
+    total_income_tax_with_reconstruction = max(0, total_income_tax_pre_cut - teigaku_genzei_tax)
+
+    # 外国税額控除：米国株等の二重課税を調整（限度額計算含む）
     foreign_withholding_tax = round(div_usd_jpy_tokutei * 0.10,-1)
     if total_income > 0:
         limit_foreign_tax_credit = int(total_income_tax_with_reconstruction * (div_usd_jpy_tokutei / total_income))
@@ -364,20 +381,29 @@ with tab_tax:
         limit_foreign_tax_credit = 0
     foreign_tax_credit = min(foreign_withholding_tax, limit_foreign_tax_credit)
 
+    # --- 3-5. 最終的な精算額（還付か支払いか） ---
+    # 特定口座ですでに源泉徴収（約15.3%）されている税額を算出
     withholding_tax = int((div_jpy_tokutei + div_usd_jpy_tokutei*0.9) * 0.15315)
+    # 確定申告後の最終納付・還付額（100円単位）
     final_tax_amount = round(total_income_tax_with_reconstruction - foreign_tax_credit - withholding_tax, -2)
 
+    # --- 3-6. 住民税の計算 ---
+    # 住民税用の控除（基礎控除が所得税より低く、43万で計算）
     residence_total_deductions = pension + h_ins + ideco + medical + 430000
     residence_taxable_income = max(0, round(total_income - residence_total_deductions, -2))
+    # 基本税率10%
     residence_income = residence_taxable_income * 0.10
     
+    # 調整控除
     if residence_taxable_income <= 2000000:
         adjustment_deduction = min(50000, residence_taxable_income) * 0.05
     else:
         adjustment_deduction = max(2500, (50000 - (residence_taxable_income - 2000000)) * 0.05)
 
+    #住民税配当控除
     residence_dividend_deduction = int(div_jpy_tokutei * 0.028)
 
+    #ふるさと納税控除
     if furusato > 2000:
         target_furusato = furusato - 2000
         furusato_basic = target_furusato * 0.10
@@ -386,12 +412,50 @@ with tab_tax:
         furusato_residence_deduction = furusato_basic + furusato_special
     else:
         furusato_residence_deduction = 0
-
-    residence_income_tax_final = max(0, residence_income - adjustment_deduction - residence_dividend_deduction - furusato_residence_deduction)
-    residence_tax = int(residence_income_tax_final + 5000)
     
-    consumption_tax = round((sales / 1.1 * 0.02), -2) 
+    # 住民税の定額減税（2024年度のみ10,000円）
+    teigaku_genzei_residence = 10000 if target_tax_year == 2024 else 0
+
+    residence_income_tax_final = max(0, residence_income - adjustment_deduction - residence_dividend_deduction - furusato_residence_deduction - teigaku_genzei_residence)
+    # 均等割（5,000円）を加えて最終住民税額を算出
+    residence_tax = round(residence_income_tax_final + 5000, -2)
+    
+    # --- 3-7. 消費税の計算 ---
+    consumption_tax = round((sales / 1.1 * 0.02), -2)
+
+    # --- 3-8. ふるさと納税限度額の計算 --- 
     furusato_limit = int((taxable_income * 0.1 * 0.2) / (0.9 - income_tax / (calc_taxable if calc_taxable > 0 else 1) * 1.021) + 2000)
+
+    # --- 3-9. 国民健康保険料の計算 ---
+    # 賦課標準額の算出（国保用の基礎控除43万円を引く）
+    kokuho_base_income = max(0, total_income - 430000)
+
+    # 保険料率の設定 (杉並区の値を参照。次年度の値は不明となるため、現年度の値を使用して次年度の金額を概算する。)
+    #2024年度は医療分8.69%/49100円、支援金分2.80%/16500円
+    #2025年度は医療分7.71%/47300円、支援金分2.69%/16800円
+    if target_tax_year == 2024:
+        # 2024年度（令和6年度）の標準的な例
+        rate_medical, capita_medical = 0.0869, 49100 # 医療分
+        rate_support, capita_support = 0.0280, 16500 # 支援金分
+    elif target_tax_year == 2025:
+        # 2025年度
+        rate_medical, capita_medical = 0.0771, 47300 # 医療分
+        rate_support, capita_support = 0.0269, 16800 # 支援金分
+    elif target_tax_year == 2026:
+        # 2026年度
+        rate_medical, capita_medical = 0.0771, 47300 # 医療分
+        rate_support, capita_support = 0.0269, 16800 # 支援金分
+    else:
+        # 2027年度以降
+        rate_medical, capita_medical = 0.0771, 47300 # 医療分
+        rate_support, capita_support = 0.0269, 16800 # 支援金分
+
+    # 各項目の計算
+    medical_amount = (kokuho_base_income * rate_medical) + capita_medical
+    support_amount = (kokuho_base_income * rate_support) + capita_support
+
+    # 4. 合計額の算出 (各区分に賦課限度額があるが、一旦単純合算)
+    calculated_h_ins = int(medical_amount + support_amount)
 
     # 保存処理の実行
     if submit_button:
@@ -417,5 +481,5 @@ with tab_tax:
     m_col3.metric("消費税", f"{consumption_tax:,.0f} 円")
 
     m_col4, m_col5 = st.columns(2)
-    m_col4.metric("国民健康保険料（次年度分）", f"{h_ins:,.0f} 円")
+    m_col4.metric("国民健康保険料（次年度分）", f"{calculated_h_ins :,.0f} 円")
     m_col5.metric("ふるさと納税限度額", f"{furusato_limit:,.0f} 円")
