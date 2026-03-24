@@ -130,10 +130,18 @@ with tab_div:
 
             # --- 5. ステータス集計 ---
             st.subheader("🚥 配当金ステータス状況")
-            inc_count, stay_count, dec_count, new_count = 0, 0, 0, 0
+
+            # 前年データをあらかじめ辞書(Hash Map)化しておく
+            prev_year = int(selected_year) - 1
+            prev_year_df = base_df[base_df['year'] == prev_year][['ticker_name', 'month', 'currency', 'dividend_unit_jpy', 'dividend_unit_usd']]
             
-            # 【重要】現在画面でフィルタリングされている銘柄のみを対象にする
-            # (銘柄タイプや特定銘柄の選択がすでに反映された filtered_df を使用)
+            # 辞書を作成 { (銘柄名, 月): 単価 }
+            prev_data_dict = {}
+            for _, row in prev_year_df.iterrows():
+                unit = row['dividend_unit_jpy'] if row['currency'] == 'JPY' else row['dividend_unit_usd']
+                prev_data_dict[(row['ticker_name'], row['month'])] = unit
+            
+            inc_count, stay_count, dec_count, new_count = 0, 0, 0, 0
             this_year_filtered_names = filtered_df['ticker_name'].unique()
             
             for stock in this_year_filtered_names:
@@ -152,35 +160,27 @@ with tab_div:
                 unit_col = 'dividend_unit_jpy' if currency == 'JPY' else 'dividend_unit_usd'
                 t_val = this_month_data[unit_col].max()
                 
-                # --- 前年データの探索 (同月 -> 前月 -> 次月の順) ---
-                prev_year = int(selected_year) - 1
-                
-                # 候補となる月リスト [ターゲット月, 前の月, 次の月]
-                # 1月の前は12月、12月の次は1月になるよう調整
                 months_to_check = [
                     target_month, 
                     12 if target_month == 1 else target_month - 1, 
                     1 if target_month == 12 else target_month + 1
                 ]
                 
-                found_prev = False
+                p_val = None
                 for m in months_to_check:
-                    stock_prev_df = base_df[
-                        (base_df['year'] == prev_year) & 
-                        (base_df['ticker_name'] == stock) & 
-                        (base_df['month'] == m)
-                    ]
-                    
-                    if not stock_prev_df.empty:
-                        p_val = stock_prev_df[unit_col].max()
-                        if t_val > p_val: inc_count += 1
-                        elif t_val < p_val: dec_count += 1
-                        else: stay_count += 1
-                        found_prev = True
-                        break # 見つかったらループ終了
+                    # 辞書にキーが存在するかチェックするだけ（計算量 O(1)）
+                    if (stock, m) in prev_data_dict:
+                        p_val = prev_data_dict[(stock, m)]
+                        break
                 
-                if not found_prev:
+                if p_val is None:
                     new_count += 1
+                elif t_val > p_val:
+                    inc_count += 1
+                elif t_val < p_val:
+                    dec_count += 1
+                else:
+                    stay_count += 1
 
             # メトリック表示
             c1, c2, c3, c4 = st.columns(4)
