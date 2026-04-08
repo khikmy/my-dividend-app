@@ -109,7 +109,7 @@ with tab_div:
             fig.update_traces(texttemplate="<b>%{label}</b><br>%{value:,.0f}円")
             fig.update_coloraxes(showscale=False)
             fig.update_layout(margin=dict(t=30, b=10, l=10, r=10), height=450)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             
             st.subheader(f"📅 {selected_year}年 月別配当金受取額推移（{selected_type}）")
             all_months = pd.DataFrame({"month": range(1, 13)})
@@ -157,7 +157,7 @@ with tab_div:
                 )
             )
             
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, use_container_width=True, config={'displayModeBar': False})
 
             # --- 5. ステータス集計 ---
             st.subheader("🚥 配当金ステータス状況")
@@ -284,7 +284,7 @@ with tab_forex:
         fig_pie.update_layout(margin=dict(t=30, b=10, l=10, r=10), height=550) # 高さを少し調整
         
         # 1カラムでグラフを大きく表示
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
         
     else:
         st.info("外貨資産データが登録されていません。")
