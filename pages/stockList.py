@@ -157,17 +157,20 @@ with c_btn3:
 
 df = load_data()
 if not df.empty:
-    c_p1, c_p2, c_p3 = st.columns([1.0, 2.0, 0.5], vertical_alignment="bottom")
+    c_p1, c_p2 = st.columns([1, 2], vertical_alignment="bottom")
+
     with c_p1:
         type_options_list = ["すべて", "日本株", "米国株"]
         current_index = type_options_list.index(st.session_state.list_type_val)
-        selected_list_type = st.selectbox("銘柄タイプ", type_options_list, index=current_index, key="list_type_widget")
-        st.session_state.list_type_val = selected_list_type
+        st.session_state.list_type_val = st.selectbox("銘柄タイプ", type_options_list, index=current_index)
+
     with c_p2:
-        search_query = st.text_input("銘柄名・コードで検索", placeholder="例: 9101, NVDA", key="ticker_search")
-    with c_p3:
-        if st.button("🔍", use_container_width=True):
-            st.rerun()
+        search_col, btn_col = st.columns([0.9, 0.1], vertical_alignment="bottom")
+        with search_col:
+            search_query = st.text_input("銘柄名・コードで検索", placeholder="例: 9101", key="ticker_search")
+        with btn_col:
+            if st.button("🔍", use_container_width=True):
+                st.rerun()
                 
     st.divider()
     list_df = df.copy()
@@ -184,39 +187,99 @@ if not df.empty:
         ticker_order_df = unique_ticker_info.sort_values("ticker_code")
         for _, row in ticker_order_df.iterrows():
             ticker, t_code = row['ticker_name'], row['ticker_code']
-            ticker_df = list_df[list_df["ticker_code"] == t_code].sort_values(by=["year", "month"])
+            ticker_df = list_df[list_df["ticker_code"] == t_code].sort_values(by=["year", "month"], ascending=False)
             currency = ticker_df['currency'].iloc[0]
+            
             with st.expander(f"{ticker}（{t_code}）"):
+                # --- 1. 累計エリア ---
                 c1, c2, c3 = st.columns(3)
                 c1.metric("特定口座 累計", f"{ticker_df['amount_tokutei'].sum():,.0f} 円")
                 c2.metric("NISA口座 累計", f"{ticker_df['amount_nisa'].sum():,.0f} 円")
                 c3.metric("合計", f"{(ticker_df['amount_tokutei'].sum()+ticker_df['amount_nisa'].sum()):,.0f} 円")
-                col_b1, col_b2 = st.columns([1, 1])
-                with col_b1:
-                    if st.button(f"➕ 配当金データを追加する", key=f"add_{t_code}"):
-                        # セッションに値をセット（ダイアログ内の初期値として使われます）
+                
+                # --- 2. 操作・ラベルエリア ---
+                db_status = ticker_df['last_check_status'].iloc[0] if 'last_check_status' in ticker_df.columns else None
+                btn_col1, btn_col2 = st.columns(2)
+                
+                with btn_col1:
+                    if db_status:
+                        st.markdown(f'''
+                            <div style="
+                                background-color: {ticker_df["last_check_color"].iloc[0]}; 
+                                color: white; 
+                                padding: 10px; 
+                                border-radius: 8px; 
+                                font-size: 1.0rem; 
+                                font-weight: bold; 
+                                text-align: center; 
+                                min-height: 40px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                line-height: 1.0;
+                                margin-bottom: 12px;
+                                width: 100%;
+                            ">
+                                {db_status}：{ticker_df["last_check_info"].iloc[0]}
+                            </div>
+                        ''', unsafe_allow_html=True)
+                    else:
+                        # ステータスがない場合は空のカラムを維持（ボタンの位置を固定するため）
+                        st.write("")
+
+                with btn_col2:
+                    if st.button(f"➕ 配当金データを追加", key=f"add_{t_code}", use_container_width=True):
                         st.session_state.pre_code = t_code
                         st.session_state.pre_name = ticker
                         st.session_state.pre_currency = currency
-                        # ダイアログを起動（edit_dataはNoneなので新規登録モードで開く）
                         show_dividend_dialog()
-                with col_b2:
-                    db_status = ticker_df['last_check_status'].iloc[0] if 'last_check_status' in ticker_df.columns else None
-                    if db_status:
-                        st.markdown(f'<div style="display:flex;justify-content:center;align-items:center;width:100%;"><span style="background-color:{ticker_df["last_check_color"].iloc[0]};color:white;width:60%;height:38.4px;display:flex;justify-content:center;align-items:center;border-radius:8px;font-size:0.9em;font-weight:bold;">{db_status}：{ticker_df["last_check_info"].iloc[0]}</span></div>', unsafe_allow_html=True)
-                unit_label = "（円）" if currency == "JPY" else "（USD）"
-                col_widths = [0.6, 0.6, 1.0, 1.4, 1.4, 1.4, 1.4, 0.6, 0.6]
-                h = st.columns(col_widths)
-                h[0].write("**年**"); h[1].write("**月**"); h[2].write(f"単価{unit_label}"); h[3].write("**特定口座保有株数（株）**"); h[4].write("**特定口座受取金額（円）**"); h[5].write("**NISA口座保有株数（株）**"); h[6].write("**NISA口座受取金額（円）**")
+
+
+                # --- 3. 履歴カードエリア ---
+                unit_label = "円" if currency == "JPY" else "USD"
+                
                 for _, r_data in ticker_df.iterrows():
-                    r = st.columns(col_widths)
-                    r[0].write(f"{r_data['year']}"); r[1].write(f"{r_data['month']}")
-                    u_val = r_data['dividend_unit_jpy'] if currency == "JPY" else r_data['dividend_unit_usd']
-                    r[2].write(f"{u_val}"); r[3].write(f"{r_data['shares_tokutei']}"); r[4].write(f"{r_data['amount_tokutei']:,.0f}"); r[5].write(f"{r_data['shares_nisa']}"); r[6].write(f"{r_data['amount_nisa']:,.0f}")
-                    if r[7].button("📝", key=f"edit_{r_data['id']}"):
-                        show_dividend_dialog(edit_data=r_data.to_dict())
-                    if r[8].button("🗑️", key=f"del_{r_data['id']}"):
-                        delete_confirm_dialog(r_data['id'], ticker, r_data['year'], r_data['month'])
+                    with st.container(border=True):
+                        # 1. 年月
+                        st.markdown(f"""
+                            <div style='font-size: 1.25em; font-weight: bold; margin-bottom: 10px;'>
+                                {r_data['year']}年{r_data['month']}月
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # 2. 合計受取金額と配当単価をヘッダーとして横並びに
+                        h_col1, h_col2 = st.columns([1, 1])
+                        total_m = r_data['amount_tokutei'] + r_data['amount_nisa']
+                        u_val = r_data['dividend_unit_jpy'] if currency == "JPY" else r_data['dividend_unit_usd']
+                        
+                        with h_col1:
+                            st.write(f"合計受取金額：{total_m:,.0f}円")
+                        with h_col2:
+                            st.write(f"配当単価：{u_val}{unit_label}")
+
+                        # --- 口座情報をPCでは左右(1:1)、スマホでは縦に ---
+                        col_acc1, col_acc2 = st.columns(2)
+                        
+                        with col_acc1:
+                            st.markdown(f"""
+                            **【特定口座】**<br>
+                            保有株数：{r_data['shares_tokutei']}株  
+                            受取金額：{r_data['amount_tokutei']:,.0f}円
+                            """, unsafe_allow_html=True)
+                            
+                        with col_acc2:
+                            st.markdown(f"""
+                            **【NISA口座】**<br>
+                            保有株数：{r_data['shares_nisa']}株  
+                            受取金額：{r_data['amount_nisa']:,.0f}円
+                            """, unsafe_allow_html=True)
+
+                        # 編集・削除ボタン
+                        b1, b2 = st.columns(2)
+                        if b1.button("📝 編集", key=f"edit_{r_data['id']}", use_container_width=True):
+                            show_dividend_dialog(edit_data=r_data.to_dict())
+                        if b2.button("🗑️ 削除", key=f"del_{r_data['id']}", use_container_width=True):
+                            delete_confirm_dialog(r_data['id'], ticker, r_data['year'], r_data['month'])
     else:
         st.info("条件に一致する銘柄が見つかりませんでした。")
 else:

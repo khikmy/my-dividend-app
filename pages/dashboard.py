@@ -19,9 +19,7 @@ tab_div, tab_forex, tab_tax = st.tabs(["💵 配当金", "🌍 保有外貨", "�
 # タブ1: 配当金サマリー
 # ==========================================================
 with tab_div:
-    st.header("配当金ダッシュボード")
-    
-    # --- アクションボタン (ヘッダー直下) ---
+    # --- アクションボタン ---
     c_header_l, c_header_r = st.columns([1, 5])
     with c_header_l:
         if st.button("📋 保有銘柄を確認", use_container_width=True, key="nav_to_stock_list"):
@@ -117,15 +115,48 @@ with tab_div:
             all_months = pd.DataFrame({"month": range(1, 13)})
             monthly_summary = filtered_df.groupby("month")["total_jpy"].sum().reset_index()
             monthly_plot_df = pd.merge(all_months, monthly_summary, on="month", how="left").fillna(0)
-            
+
             fig_bar = px.bar(monthly_plot_df, x="month", y="total_jpy", labels={"month": "月", "total_jpy": "受取額（円）"}, color_discrete_sequence=['#636EFA'])
             max_val = monthly_plot_df["total_jpy"].max()
             y_limit = max(max_val * 1.2, 10000)
+
             fig_bar.update_layout(
-                xaxis=dict(tickmode='array', tickvals=list(range(1, 13)), ticktext=[f"{m}月" for m in range(1, 13)], range=[0.5, 12.5], title=None),
-                yaxis=dict(range=[0, y_limit], tickformat=",d", ticksuffix="円", title=None),
-                height=500,
+                xaxis=dict(
+                    tickmode='array', 
+                    tickvals=list(range(1, 13)), 
+                    ticktext=[f"{m}" for m in range(1, 13)], 
+                    range=[0.5, 12.5], 
+                    title=None,
+                    automargin=True,
+                    tickangle=0,
+                    dtick=1
+                ),
+                yaxis=dict(
+                    range=[0, y_limit], 
+                    tickformat=",d", 
+                    ticksuffix="", 
+                    title=None,
+                ),
+                height=450,
+                # 左下付近に文字を置くため、余白を調整
+                margin=dict(t=20, b=60, l=60, r=10) 
             )
+
+            # --- 「(円/月)」を1月の左側に配置 ---
+            fig_bar.add_annotation(
+                dict(
+                    x=-0.01,
+                    y=-0.02,
+                    xref="paper", 
+                    yref="paper",
+                    text="(円/月)",
+                    showarrow=False,
+                    font=dict(size=12),
+                    xanchor="right",
+                    yanchor="top"
+                )
+            )
+            
             st.plotly_chart(fig_bar, use_container_width=True)
 
             # --- 5. ステータス集計 ---
@@ -198,8 +229,19 @@ with tab_div:
 
             st.subheader(f"🏆 {selected_year}年 配当金受取額ランキング（{selected_type}）")
             ranking_df = portfolio_df.sort_values("total_jpy", ascending=False).head(10)
-            ranking_df.columns = ["銘柄名", "配当金（円）"]
-            st.dataframe(ranking_df.style.format({"配当金（円）": "{:,.0f}"}), hide_index=True, use_container_width=True)
+            
+            # --- カード形式での表示 ---
+            for i, (idx, row) in enumerate(ranking_df.iterrows(), 1):
+                # 順位に応じてメダルの色を変える（遊び心）
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}位"
+                
+                with st.container(border=True):
+                    # 銘柄名と金額を2カラムに分ける（金額を右寄せにしたい場合）
+                    c_name, c_val = st.columns([3, 1])
+                    with c_name:
+                        st.markdown(f"**{medal} {row['ticker_name']}**")
+                    with c_val:
+                        st.markdown(f"<div style='text-align: right;'>{row['total_jpy']:,.0f} <small>円</small></div>", unsafe_allow_html=True)
         else:
             st.info("該当するデータはありません。")
     else:
@@ -209,9 +251,7 @@ with tab_div:
 # タブ2: 外貨資産サマリー
 # ==========================================================
 with tab_forex:
-    st.header("保有外貨ダッシュボード")
     df_forex = load_forex_data()
-
     col_btn, _ = st.columns([1, 5]) 
     with col_btn:
         if st.button("📋 保有外貨を確認", use_container_width=True, key="nav_to_forex_list"):
@@ -253,7 +293,6 @@ with tab_forex:
 # タブ3: 確定申告シミュレーション
 # ==========================================================
 with tab_tax:
-    st.header("税金シミュレーション")
     st.info("※このシミュレーションは概算です。正確な税額は確定申告書作成ソフト等でご確認ください。")
 
     # --- 1. データの読み込み ---
