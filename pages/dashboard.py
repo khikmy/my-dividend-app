@@ -13,7 +13,7 @@ def get_cached_forex():
 
 st.set_page_config(page_title="配当金ダッシュボード", layout="wide")
 
-tab_div, tab_forex, tab_tax = st.tabs(["💵 配当金", "🌍 保有外貨", "🧾 税金シミュレーション"])
+tab_div, tab_tax, tab_forex = st.tabs(["💵 配当金", "🧾 税金シミュレーション", "🌍 保有外貨"])
 
 # ==========================================================
 # タブ1: 配当金サマリー
@@ -248,49 +248,7 @@ with tab_div:
         st.info("配当金データがまだありません。")
 
 # ==========================================================
-# タブ2: 外貨資産サマリー
-# ==========================================================
-with tab_forex:
-    df_forex = load_forex_data()
-    col_btn, _ = st.columns([1, 5]) 
-    with col_btn:
-        if st.button("📋 保有外貨を確認", use_container_width=True, key="nav_to_forex_list"):
-            st.switch_page("pages/foreignCurrencyList.py")
-
-    if not df_forex.empty:
-        # 合計円換算額の算出
-        total_forex_jpy = df_forex['jpy'].sum()
-
-        # --- 2. メトリック表示 ---
-        st.markdown(f"""
-            <div style="margin-bottom: 20px;">
-                <h3 style="margin-bottom: 0px;">保有外貨総額 (円換算)</h3>
-                <div style="display: flex; align-items: baseline; gap: 10px;">
-                    <span style="font-size: 2.5rem;">{total_forex_jpy:,.0f}</span>
-                    <span style="font-size: 1.2rem; font-weight: 500;">円</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # --- 3. グラフ表示（詳細テーブルを削除し、グラフをメインに） ---
-        fig_pie = px.pie(
-            df_forex, 
-            values='jpy', 
-            names='通貨', 
-            hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-        fig_pie.update_layout(margin=dict(t=30, b=10, l=10, r=10), height=550) # 高さを少し調整
-        
-        # 1カラムでグラフを大きく表示
-        st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
-        
-    else:
-        st.info("外貨資産データが登録されていません。")
-
-# ==========================================================
-# タブ3: 確定申告シミュレーション
+# タブ2: 確定申告シミュレーション
 # ==========================================================
 with tab_tax:
     st.info("※このシミュレーションは概算です。正確な税額は確定申告書作成ソフト等でご確認ください。")
@@ -522,3 +480,45 @@ with tab_tax:
     m_col4, m_col5 = st.columns(2)
     m_col4.metric("国民健康保険料（次年度分）", f"{calculated_h_ins :,.0f} 円")
     m_col5.metric("ふるさと納税限度額", f"{furusato_limit:,.0f} 円")
+
+# ==========================================================
+# タブ3: 外貨資産サマリー
+# ==========================================================
+with tab_forex:
+    df_forex = load_forex_data()
+    col_btn, _ = st.columns([1, 5]) 
+    with col_btn:
+        if st.button("📋 保有外貨を確認", use_container_width=True, key="nav_to_forex_list"):
+            st.switch_page("pages/foreignCurrencyList.py")
+
+    if not df_forex.empty:
+        # 合計円換算額の算出
+        total_forex_jpy = df_forex['jpy'].sum()
+
+        # --- 2. メトリック表示 ---
+        st.markdown(f"""
+            <div style="margin-bottom: 20px;">
+                <h3 style="margin-bottom: 0px;">保有外貨総額 (円換算)</h3>
+                <div style="display: flex; align-items: baseline; gap: 10px;">
+                    <span style="font-size: 2.5rem;">{total_forex_jpy:,.0f}</span>
+                    <span style="font-size: 1.2rem; font-weight: 500;">円</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # --- 3. グラフ表示（詳細テーブルを削除し、グラフをメインに） ---
+        fig_pie = px.pie(
+            df_forex, 
+            values='jpy', 
+            names='通貨', 
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        fig_pie.update_layout(margin=dict(t=30, b=10, l=10, r=10), height=550) # 高さを少し調整
+        
+        # 1カラムでグラフを大きく表示
+        st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
+        
+    else:
+        st.info("外貨資産データが登録されていません。")
