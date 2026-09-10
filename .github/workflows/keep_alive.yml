@@ -1,0 +1,28 @@
+name: Streamlit & Supabase Keep Alive
+
+on:
+  schedule:
+    # 毎日 0:00, 12:00 (UTC) に実行（1日2回）
+    - cron: '0 0,12 * * *'
+  workflow_dispatch: # 手動実行用
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Streamlit アプリの起動維持
+      - name: Keep Streamlit Alive
+        run: |
+          curl -sS https://khikmymain.streamlit.app > /dev/null
+          echo "Streamlit keep-alive ping sent!"
+
+      # 2. Supabase DBの休眠防止（REST API経由でテーブルを1件参照）
+      - name: Keep Supabase Alive
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          curl -sS -X GET "$SUPABASE_URL/rest/v1/dividend_records?select=count" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" > /dev/null
+          echo "Supabase keep-alive ping sent!"
