@@ -225,6 +225,22 @@ export default function DashboardPage() {
     return portfolioData.slice(0, 10);
   }, [portfolioData]);
 
+  // Pie chart data: top N stocks + rest grouped into "その他" to keep slices readable
+  const PIE_TOP_N = 10;
+  const portfolioPieData = useMemo(() => {
+    if (portfolioData.length <= PIE_TOP_N) return portfolioData;
+    const top = portfolioData.slice(0, PIE_TOP_N);
+    const otherValue = portfolioData
+      .slice(PIE_TOP_N)
+      .reduce((sum, d) => sum + d.value, 0);
+    return [...top, { name: 'その他', value: otherValue }];
+  }, [portfolioData]);
+
+  const portfolioPieTotal = useMemo(
+    () => portfolioPieData.reduce((sum, d) => sum + d.value, 0),
+    [portfolioPieData]
+  );
+
   // Status counts (増配 / 減配 / 維持 / 新規)
   const statusCounts = useMemo(() => {
     let base = dividends;
@@ -574,34 +590,52 @@ export default function DashboardPage() {
                 <span>ポートフォリオ銘柄構成比</span>
               </h3>
               {portfolioData.length > 0 ? (
-                <div className="h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={portfolioData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={95}
-                        paddingAngle={2}
-                      >
-                        {portfolioData.map((_, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(val: number) => [`¥ ${val.toLocaleString()}`, '受取額']}
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: '1px solid #e2e8f0',
-                        }}
-                      />
-                      <Legend layout="horizontal" align="center" verticalAlign="bottom" />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
+                <>
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={portfolioPieData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={95}
+                          paddingAngle={2}
+                        >
+                          {portfolioPieData.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.name === 'その他' ? '#cbd5e1' : COLORS[index % COLORS.length]}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(val: number) => {
+                            const percent = portfolioPieTotal > 0 ? ((val / portfolioPieTotal) * 100).toFixed(1) : '0.0';
+                            return [`¥ ${val.toLocaleString()} (${percent}%)`, '受取額'];
+                          }}
+                          contentStyle={{
+                            borderRadius: '12px',
+                            border: '1px solid #e2e8f0',
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-2">
+                    {portfolioPieData.map((entry, index) => (
+                      <div key={entry.name} className="flex items-center gap-1.5 text-xs text-slate-600">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: entry.name === 'その他' ? '#cbd5e1' : COLORS[index % COLORS.length] }}
+                        />
+                        <span>{entry.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <div className="h-72 flex items-center justify-center text-sm text-slate-400">
                   該当データがありません
