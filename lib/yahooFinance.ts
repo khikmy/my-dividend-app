@@ -72,12 +72,14 @@ export async function checkDividendStatus(
       );
     }
 
-    const lDisp = Math.round(latestVal * 10) / 10;
+    // 日本株は小数点第一位まで、米国株は小数点第三位まで表示
+    const decimals = currency === 'JPY' ? 1 : 3;
+    const lDisp = latestVal.toFixed(decimals);
 
     if (prevCandidates.length > 0) {
       const prev = prevCandidates[prevCandidates.length - 1];
       const prevVal = prev.amount;
-      const pDisp = Math.round(prevVal * 10) / 10;
+      const pDisp = prevVal.toFixed(decimals);
 
       let rateStr = '';
       if (prevVal > 0) {

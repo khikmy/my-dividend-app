@@ -24,7 +24,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
 import { supabase } from '@/lib/supabase';
 import { calculateTax } from '@/lib/tax';
@@ -387,13 +386,26 @@ export default function DashboardPage() {
   // Forex Total & Pie data
   const { forexTotalJpy, forexPieData } = useMemo(() => {
     const total = forexRecords.reduce((acc, r) => acc + (r.jpy || 0), 0);
-    const pie = forexRecords
+    const all = forexRecords
       .filter((r) => (r.jpy || 0) > 0)
       .map((r) => ({
         name: r.currency,
         value: r.jpy || 0,
       }))
       .sort((a, b) => b.value - a.value);
+
+    // Top N currencies + rest grouped into "その他" to keep slices readable
+    const pie =
+      all.length <= PIE_TOP_N
+        ? all
+        : [
+            ...all.slice(0, PIE_TOP_N),
+            {
+              name: 'その他',
+              value: all.slice(PIE_TOP_N).reduce((sum, d) => sum + d.value, 0),
+            },
+          ];
+
     return { forexTotalJpy: total, forexPieData: pie };
   }, [forexRecords]);
 
@@ -612,9 +624,9 @@ export default function DashboardPage() {
                           ))}
                         </Pie>
                         <Tooltip
-                          formatter={(val: number) => {
+                          formatter={(val: number, name: string) => {
                             const percent = portfolioPieTotal > 0 ? ((val / portfolioPieTotal) * 100).toFixed(1) : '0.0';
-                            return [`¥ ${val.toLocaleString()} (${percent}%)`, '受取額'];
+                            return [`¥ ${val.toLocaleString()} (${percent}%)`, name];
                           }}
                           contentStyle={{
                             borderRadius: '12px',
@@ -976,33 +988,52 @@ export default function DashboardPage() {
               <span>通貨別保有割合（円換算）</span>
             </h3>
             {forexPieData.length > 0 ? (
-              <div className="h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={forexPieData}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={100}
-                      label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
-                    >
-                      {forexPieData.map((_, index) => (
-                        <Cell key={`cell-fx-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(val: number) => [`¥ ${val.toLocaleString()}`, '日本円換算']}
-                      contentStyle={{
-                        borderRadius: '12px',
-                        border: '1px solid #e2e8f0',
-                      }}
-                    />
-                    <Legend layout="horizontal" align="center" verticalAlign="bottom" />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={forexPieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={95}
+                        paddingAngle={2}
+                      >
+                        {forexPieData.map((entry, index) => (
+                          <Cell
+                            key={`cell-fx-${index}`}
+                            fill={entry.name === 'その他' ? '#cbd5e1' : COLORS[index % COLORS.length]}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(val: number, name: string) => {
+                          const percent = forexTotalJpy > 0 ? ((val / forexTotalJpy) * 100).toFixed(1) : '0.0';
+                          return [`¥ ${val.toLocaleString()} (${percent}%)`, name];
+                        }}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid #e2e8f0',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-2">
+                  {forexPieData.map((entry, index) => (
+                    <div key={entry.name} className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: entry.name === 'その他' ? '#cbd5e1' : COLORS[index % COLORS.length] }}
+                      />
+                      <span>{entry.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : (
               <div className="h-64 flex items-center justify-center text-sm text-slate-400">
                 外貨データが登録されていません
