@@ -45,3 +45,6 @@ venv/
 __pycache__/
 **/__pycache__/
 *.pyc
+
+# personal data seed scripts (not for source control)
+budget_seed.sql

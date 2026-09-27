@@ -2,24 +2,37 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { 
-  ArrowLeft, 
-  RefreshCw, 
-  PlusCircle, 
-  Coins, 
-  Edit2, 
-  Trash2, 
+import {
+  ArrowLeft,
+  RefreshCw,
+  PlusCircle,
+  Edit2,
+  Trash2,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+} from 'recharts';
 import { supabase } from '@/lib/supabase';
 import { ForeignCurrencyRecord } from '@/types/database';
 import { CURRENCY_TO_COUNTRY } from '@/lib/forex';
 import ForexModal from '@/components/ForexModal';
 import ConfirmModal from '@/components/ConfirmModal';
 
+const COLORS = [
+  '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#0d9488',
+  '#14b8a6', '#2dd4bf', '#f59e0b', '#fbbf24', '#ec4899',
+  '#8b5cf6', '#6366f1', '#10b981', '#64748b'
+];
+const PIE_TOP_N = 10;
+
 export default function ForexPage() {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'list'>('dashboard');
+
   const [records, setRecords] = useState<ForeignCurrencyRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -114,6 +127,26 @@ export default function ForexPage() {
     return records.reduce((acc, r) => acc + (r.jpy || 0), 0);
   }, [records]);
 
+  // Pie chart data: top N currencies + rest grouped into "その他"
+  const pieData = useMemo(() => {
+    const all = records
+      .filter((r) => (r.jpy || 0) > 0)
+      .map((r) => ({
+        name: CURRENCY_TO_COUNTRY[r.currency] || r.currency,
+        value: r.jpy || 0,
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    if (all.length <= PIE_TOP_N) return all;
+    return [
+      ...all.slice(0, PIE_TOP_N),
+      {
+        name: 'その他',
+        value: all.slice(PIE_TOP_N).reduce((sum, d) => sum + d.value, 0),
+      },
+    ];
+  }, [records]);
+
   // Delete confirm
   const handleDeleteConfirm = async () => {
     if (!recordToDelete) return;
@@ -139,7 +172,7 @@ export default function ForexPage() {
       {/* Header Info */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">保有外貨一覧</h1>
+          <h1 className="text-2xl font-bold text-slate-800">保有外貨管理</h1>
           <p className="text-xs text-slate-400 mt-0.5">
             為替レート状況最終更新日時: {lastUpdateStr}
           </p>
@@ -148,11 +181,11 @@ export default function ForexPage() {
         {/* Action buttons */}
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/"
+            href="/dividend"
             className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>ダッシュボードへ</span>
+            <span>配当金管理へ</span>
           </Link>
 
           <button
@@ -185,111 +218,211 @@ export default function ForexPage() {
         </div>
       )}
 
-      {/* Total & Sort Panel */}
-      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <span className="text-xs font-semibold text-slate-400 block">外貨資産総額 (円換算)</span>
-          <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5 block">
-            ¥ {totalJpy.toLocaleString()}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">並べ替え:</span>
-          <select
-            value={sortOption}
-            onChange={(e) => setSortOption(e.target.value as any)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="high">保有額が高い順</option>
-            <option value="low">保有額が低い順</option>
-            <option value="name">国名順</option>
-          </select>
-        </div>
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+            activeTab === 'dashboard'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>ダッシュボード</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('list')}
+          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+            activeTab === 'list'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>保有外貨一覧</span>
+        </button>
       </div>
 
-      {/* Currency Cards List */}
       {loading ? (
         <div className="flex items-center justify-center min-h-[300px]">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
         </div>
-      ) : sortedRecords.length === 0 ? (
-        <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-400 text-sm">
-          外貨データがありません。「新規外貨金額を登録」から追加してください。
+      ) : activeTab === 'dashboard' ? (
+        <div className="space-y-6">
+          {/* Total Forex Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <h3 className="text-sm font-semibold text-slate-500">
+              保有外貨総額 (日本円換算)
+            </h3>
+            <div className="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-2">
+              ¥ {totalJpy.toLocaleString()}
+            </div>
+          </div>
+
+          {/* Forex Pie Chart */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-blue-600" />
+              <span>通貨別保有割合（円換算）</span>
+            </h3>
+            {pieData.length > 0 ? (
+              <>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={95}
+                        paddingAngle={2}
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell
+                            key={`cell-fx-${index}`}
+                            fill={entry.name === 'その他' ? '#cbd5e1' : COLORS[index % COLORS.length]}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(val: number, name: string) => {
+                          const percent = totalJpy > 0 ? ((val / totalJpy) * 100).toFixed(1) : '0.0';
+                          return [`¥ ${val.toLocaleString()} (${percent}%)`, name];
+                        }}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid #e2e8f0',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-2">
+                  {pieData.map((entry, index) => (
+                    <div key={entry.name} className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: entry.name === 'その他' ? '#cbd5e1' : COLORS[index % COLORS.length] }}
+                      />
+                      <span>{entry.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-sm text-slate-400">
+                外貨データが登録されていません
+              </div>
+            )}
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {sortedRecords.map((r) => {
-            const countryName = CURRENCY_TO_COUNTRY[r.currency] || r.currency;
-            const jpyVal = r.jpy || 0;
-            const rateStr = r.rate ? `${r.rate.toFixed(2)} JPY` : '未取得';
+        <div className="space-y-6">
+          {/* Total & Sort Panel */}
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <span className="text-xs font-semibold text-slate-400 block">外貨資産総額 (円換算)</span>
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5 block">
+                ¥ {totalJpy.toLocaleString()}
+              </span>
+            </div>
 
-            return (
-              <div
-                key={r.currency}
-                className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-4 hover:shadow-md transition"
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">並べ替え:</span>
+              <select
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value as any)}
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 font-bold flex items-center justify-center text-sm border border-blue-100 flex-shrink-0">
-                      {r.currency}
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900">{countryName}</h3>
-                      <span className="text-xs text-slate-400 font-mono">1 {r.currency} = {rateStr}</span>
-                    </div>
-                  </div>
+                <option value="high">保有額が高い順</option>
+                <option value="low">保有額が低い順</option>
+                <option value="name">国名順</option>
+              </select>
+            </div>
+          </div>
 
-                  <div className="text-right">
-                    <span className="text-xs text-slate-400 block">日本円換算</span>
-                    <span className="text-lg font-extrabold text-blue-700">
-                      ¥ {jpyVal.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
+          {/* Currency Cards List */}
+          {sortedRecords.length === 0 ? (
+            <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-400 text-sm">
+              外貨データがありません。「新規外貨金額を登録」から追加してください。
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sortedRecords.map((r) => {
+                const countryName = CURRENCY_TO_COUNTRY[r.currency] || r.currency;
+                const jpyVal = r.jpy || 0;
+                const rateStr = r.rate ? `${r.rate.toFixed(2)} JPY` : '未取得';
 
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                    <span className="text-slate-400 block">保有金額</span>
-                    <span className="text-sm font-bold text-slate-800 mt-0.5 block">
-                      {r.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {r.currency}
-                    </span>
-                  </div>
-
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                    <span className="text-slate-400 block">為替レート</span>
-                    <span className="text-sm font-bold text-slate-800 mt-0.5 block">
-                      {rateStr}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
-                  <button
-                    onClick={() => {
-                      setEditingRecord(r);
-                      setModalOpen(true);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
+                return (
+                  <div
+                    key={r.currency}
+                    className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-4 hover:shadow-md transition"
                   >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>編集</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setRecordToDelete(r);
-                      setDeleteModalOpen(true);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 transition"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>削除</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 font-bold flex items-center justify-center text-sm border border-blue-100 flex-shrink-0">
+                          {r.currency}
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-slate-900">{countryName}</h3>
+                          <span className="text-xs text-slate-400 font-mono">1 {r.currency} = {rateStr}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-xs text-slate-400 block">日本円換算</span>
+                        <span className="text-lg font-extrabold text-blue-700">
+                          ¥ {jpyVal.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <span className="text-slate-400 block">保有金額</span>
+                        <span className="text-sm font-bold text-slate-800 mt-0.5 block">
+                          {r.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {r.currency}
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <span className="text-slate-400 block">為替レート</span>
+                        <span className="text-sm font-bold text-slate-800 mt-0.5 block">
+                          {rateStr}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => {
+                          setEditingRecord(r);
+                          setModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>編集</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRecordToDelete(r);
+                          setDeleteModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>削除</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -328,4 +461,3 @@ export default function ForexPage() {
     </div>
   );
 }
-

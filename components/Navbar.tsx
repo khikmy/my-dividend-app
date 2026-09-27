@@ -3,25 +3,24 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { 
-  PieChart, 
-  Layers, 
-  Coins, 
-  PlusCircle, 
-  Menu, 
-  X 
+import {
+  PieChart,
+  Coins,
+  Wallet,
+  Calculator,
+  Menu,
+  X
 } from 'lucide-react';
-import DividendModal from './DividendModal';
 
 export default function Navbar() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
 
   const navItems = [
-    { name: '配当金ダッシュボード', href: '/', icon: PieChart },
-    { name: '保有銘柄一覧', href: '/stocks', icon: Layers },
-    { name: '保有外貨一覧', href: '/forex', icon: Coins },
+    { name: '資産管理', href: '/', icon: Wallet },
+    { name: '配当金管理', href: '/dividend', icon: PieChart },
+    { name: '保有外貨管理', href: '/forex', icon: Coins },
+    { name: '確定申告シミュレーション', href: '/tax-simulation', icon: Calculator },
   ];
 
   return (
@@ -61,26 +60,8 @@ export default function Navbar() {
               })}
             </nav>
 
-            {/* Action button */}
-            <div className="hidden md:flex items-center gap-2">
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-sm shadow-blue-500/25 transition active:scale-95"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>新規配当データ登録</span>
-              </button>
-            </div>
-
             {/* Mobile hamburger button */}
             <div className="flex md:hidden items-center gap-2">
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="p-2 rounded-lg bg-blue-50 text-blue-600 text-sm font-medium"
-                title="新規配当データ登録"
-              >
-                <PlusCircle className="w-5 h-5" />
-              </button>
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="p-2 rounded-lg text-slate-600 hover:bg-slate-100"
@@ -116,18 +97,6 @@ export default function Navbar() {
           </div>
         )}
       </header>
-
-      {/* Global Add Dividend Modal */}
-      {showAddModal && (
-        <DividendModal
-          isOpen={showAddModal}
-          onClose={() => setShowAddModal(false)}
-          onSuccess={() => {
-            setShowAddModal(false);
-            window.location.reload();
-          }}
-        />
-      )}
     </>
   );
 }
