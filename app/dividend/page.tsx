@@ -41,9 +41,10 @@ export default function DashboardPage() {
   const [selectedStock, setSelectedStock] = useState<string>('すべて');
 
   // Load all data
+  // 配当タブが表示されるたびに再取得する(銘柄タブでの変更を反映するため)
   useEffect(() => {
+    if (activeTab !== 'dividend') return;
     async function fetchData() {
-      setLoading(true);
       try {
         // 1. Dividend records with joined stocks
         const { data: divData } = await supabase
@@ -75,7 +76,7 @@ export default function DashboardPage() {
       }
     }
     fetchData();
-  }, []);
+  }, [activeTab]);
 
   // Derived: available years
   const availableYears = useMemo(() => {

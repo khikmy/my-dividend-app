@@ -2,6 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Wallet, CheckCircle2 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
+} from 'recharts';
 import { supabase } from '@/lib/supabase';
 import {
   BudgetRow,
@@ -15,6 +25,7 @@ import {
   buildExpenseTabData,
   buildTaxTabData,
   shiftMonthKey,
+  parseMonthKey,
 } from '@/lib/budget';
 
 const YEAR_RANGE_START = 2020;
@@ -117,6 +128,24 @@ export default function BudgetPage() {
     [monthKey, budgetRows, expenseRows, incomeRows, taxRows]
   );
   const taxData = useMemo(() => buildTaxTabData(year, taxRows), [year, taxRows]);
+
+  // 累計プール金の推移(対象年の1〜12月、計12ヶ月分)
+  const poolTrend = useMemo(() => {
+    const points = [];
+    const targetYear = parseMonthKey(monthKey).year;
+    for (let m = 1; m <= 12; m++) {
+      const k = `${targetYear}-${String(m).padStart(2, '0')}`;
+      const y = targetYear;
+      const d = buildDashboardData(k, budgetRows, expenseRows, incomeRows, taxRows);
+      points.push({
+        monthKey: k,
+        label: `${String(y).slice(2)}/${m}`,
+        poolTotal: d.poolTotal,
+        isSelected: targetYear === now.getFullYear() && k === monthKey,
+      });
+    }
+    return points;
+  }, [monthKey, budgetRows, expenseRows, incomeRows, taxRows]);
 
   const startExpenseEdit = () => {
     setEditIncome(String(expenseData.income));
@@ -341,6 +370,58 @@ export default function BudgetPage() {
                 <StatCard label="当月プール金" value={dashboardData.poolThisMonth} />
                 <StatCard label="累計プール金" value={dashboardData.poolTotal} />
               </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                <h2 className="text-base font-bold text-slate-800 mb-1">累計プール金の推移</h2>
+                <p className="text-xs text-slate-400 mb-3">
+                  {parseMonthKey(monthKey).year}年の1〜12月を表示しています(対象月: {dashboardData.monthLabel})
+                </p>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={poolTrend} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 12 }}
+                        tickLine={false}
+                        axisLine={{ stroke: '#e2e8f0' }}
+                      />
+                      <YAxis
+                        tickFormatter={(val) => `¥${(val / 10000).toLocaleString()}万`}
+                        tick={{ fontSize: 12 }}
+                        tickLine={false}
+                        axisLine={{ stroke: '#e2e8f0' }}
+                        width={64}
+                      />
+                      <Tooltip
+                        formatter={(val: number) => [yen(val), '累計プール金']}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid #e2e8f0',
+                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                        }}
+                      />
+                      {poolTrend.some((p) => p.isSelected) && (
+                        <ReferenceLine
+                          x={poolTrend.find((p) => p.isSelected)?.label}
+                          stroke="#dc2626"
+                          strokeDasharray="4 4"
+                          label={{ value: '対象月', position: 'top', fill: '#dc2626', fontSize: 11, fontWeight: 700 }}
+                        />
+                      )}
+                      <Line
+                        type="monotone"
+                        dataKey="poolTotal"
+                        stroke="#2563eb"
+                        strokeWidth={2}
+                        dot={<PoolTrendDot />}
+                        activeDot={{ r: 6 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
               <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
                 <h2 className="text-base font-bold text-slate-800 mb-3">口座別内訳</h2>
                 <table className="w-full text-sm">
@@ -637,6 +718,19 @@ export default function BudgetPage() {
       )}
     </div>
   );
+}
+
+function PoolTrendDot(props: any) {
+  const { cx, cy, payload } = props;
+  if (payload?.isSelected) {
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={9} fill="#dc2626" fillOpacity={0.15} />
+        <circle cx={cx} cy={cy} r={5} fill="#dc2626" stroke="#fff" strokeWidth={2} />
+      </g>
+    );
+  }
+  return <circle cx={cx} cy={cy} r={3} fill="#2563eb" />;
 }
 
 function StatCard({ label, value, signed }: { label: string; value: number; signed?: boolean }) {

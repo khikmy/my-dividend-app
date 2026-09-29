@@ -70,14 +70,6 @@ export default function StockList() {
           };
         });
         setDividends(flat);
-
-        // Open the first few accordions by default
-        const initialOpens: Record<string, boolean> = {};
-        const unique = Array.from(new Set(flat.map((d) => d.ticker_code)));
-        unique.slice(0, 3).forEach((code) => {
-          initialOpens[code] = true;
-        });
-        setOpenTickers((prev) => ({ ...initialOpens, ...prev }));
       }
     } catch (err) {
       console.error('Failed to load stocks data:', err);
