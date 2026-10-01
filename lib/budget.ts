@@ -6,11 +6,13 @@ export interface Category {
   region: string;
   label: string;
   match?: string;
+  // 指定した月(含む)まで表示する。省略時は常に表示。過去月のデータは残したまま新しい月だけ非表示にできる。
+  lastMonthKey?: string;
 }
 
 export const CATEGORIES: Category[] = [
   { region: '引き落とし金額', label: '奨学金' },
-  { region: '引き落とし金額', label: 'MBAカード' },
+  { region: '引き落とし金額', label: 'MBAカード', lastMonthKey: '2026-01' },
   { region: '引き落とし金額', label: 'AGPカード' },
   { region: '引き落とし金額', label: 'VIEWカード' },
   { region: '引き落とし金額', label: 'NLカード' },
@@ -25,7 +27,11 @@ export const CATEGORIES: Category[] = [
   { region: '共有口座', label: '支出額', match: '支出' },
 ];
 
-export const REGIONS = ['引き落とし金額', '投資・貯金額', '共有口座'] as const;
+export function categoriesForMonth(monthKey: string): Category[] {
+  return CATEGORIES.filter((c) => !c.lastMonthKey || monthKey <= c.lastMonthKey);
+}
+
+export const REGIONS =['引き落とし金額', '投資・貯金額', '共有口座'] as const;
 
 export const TAX_CONFIG = {
   PENSION_MONTH: 4,
@@ -276,15 +282,18 @@ export interface BudgetTabData {
 export function buildBudgetTabData(
   monthKey: string,
   budgetRows: BudgetRow[],
+  expenseRows: ExpenseRow[],
   incomeRows: IncomeRow[],
   taxRows: TaxRow[]
 ): BudgetTabData {
   const currentBudgetRows = budgetRows.filter((r) => r.month_key === monthKey);
 
-  const items: BudgetTabItem[] = CATEGORIES.map((cat) => {
+  const items: BudgetTabItem[] = categoriesForMonth(monthKey).map((cat) => {
     if (isTaxCategory(cat)) {
       return { region: cat.region, label: cat.label, amount: computeTaxMonthTotal(taxRows, monthKey) };
     }
+    const median = isTrendCard(cat.region, cat.label) ? cardMedianBudget(expenseRows, monthKey, cat.region, cat.label) : undefined;
+    if (median) return { region: cat.region, label: cat.label, amount: median.value };
     const match = matchCategoryRow(currentBudgetRows, cat);
     return { region: cat.region, label: cat.label, amount: match ? Number(match.amount) : 0 };
   });
@@ -327,10 +336,10 @@ export function buildExpenseTabData(
   incomeRows: IncomeRow[],
   taxRows: TaxRow[]
 ): ExpenseTabData {
-  const budgetTab = buildBudgetTabData(monthKey, budgetRows, incomeRows, taxRows);
+  const budgetTab = buildBudgetTabData(monthKey, budgetRows, expenseRows, incomeRows, taxRows);
   const currentExpenseRows = expenseRows.filter((r) => r.month_key === monthKey);
 
-  const items: ExpenseTabItem[] = CATEGORIES.map((cat) => {
+  const items: ExpenseTabItem[] = categoriesForMonth(monthKey).map((cat) => {
     const budgetItem = budgetTab.items.find((b) => b.region === cat.region && b.label === cat.label);
     const budgetAmount = budgetItem ? Number(budgetItem.amount) : 0;
 
@@ -355,6 +364,98 @@ export function buildExpenseTabData(
     items,
     hasAnyDefault: items.some((i) => i.isDefault),
   };
+}
+
+/* ============================================================
+ * カード支出の推移・中央値(予算の目安)
+ * ============================================================ */
+
+// 予算を過去の実績の中央値から自動で決める項目(カード3種と共有口座の支出額)
+const TREND_CATEGORIES: Category[] = CATEGORIES.filter(
+  (c) =>
+    (c.region === '引き落とし金額' && ['AGPカード', 'NLカード', 'VIEWカード'].includes(c.label)) ||
+    (c.region === '共有口座' && c.label === '支出額')
+);
+export const TREND_CARD_LABELS: string[] = TREND_CATEGORIES.map((c) => c.label);
+
+// この月以降、これらの項目の予算は入力せず、過去の実績の中央値から自動で決める
+export const MEDIAN_BUDGET_START_MONTH_KEY = '2026-09';
+
+export function isMedianBudgetMonth(monthKey: string): boolean {
+  return monthKey >= MEDIAN_BUDGET_START_MONTH_KEY;
+}
+
+function findTrendCategory(region: string, label: string): Category | undefined {
+  return TREND_CATEGORIES.find(
+    (c) => c.region === region && (c.match ? label.indexOf(c.match) !== -1 : c.label === label)
+  );
+}
+
+export function isTrendCard(region: string, label: string): boolean {
+  return !!findTrendCategory(region, label);
+}
+
+// 対象月より前で、実績が入力されている月の実績の中央値(該当月がなければ undefined)
+export function cardMedianBudget(
+  expenseRows: ExpenseRow[],
+  monthKey: string,
+  region: string,
+  label: string
+): { value: number; monthCount: number } | undefined {
+  if (!isMedianBudgetMonth(monthKey)) return undefined;
+  const cat = findTrendCategory(region, label);
+  if (!cat) return undefined;
+  const past = expenseRows.filter(
+    (r) => r.month_key < monthKey && matchCategoryRow([r], cat) !== undefined
+  );
+  if (past.length === 0) return undefined;
+  const sorted = past.map((r) => Number(r.amount)).sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  // 予算は100円単位で切り捨てる(例: 248,791 → 248,700)
+  const value = Math.floor(median / 100) * 100;
+  return { value, monthCount: past.length };
+}
+
+export interface CardTrendData {
+  // recharts用。キーは month(表示ラベル)とカード名(実績)
+  points: Record<string, number | string | undefined>[];
+  // 対象月より前で、実績が入力されている月の実績の中央値(該当月がなければキー無し)
+  medians: Record<string, number>;
+  medianMonthCounts: Record<string, number>;
+  firstMonthKey: string | null;
+}
+
+export function buildCardTrend(monthKey: string, expenseRows: ExpenseRow[]): CardTrendData {
+  const expenses = expenseRows.filter((r) => isTrendCard(r.region, r.label) && r.month_key <= monthKey);
+  if (expenses.length === 0) return { points: [], medians: {}, medianMonthCounts: {}, firstMonthKey: null };
+
+  const firstMonthKey = expenses.reduce((min, r) => (r.month_key < min ? r.month_key : min), expenses[0].month_key);
+
+  const points: CardTrendData['points'] = [];
+  let k = firstMonthKey;
+  for (let i = 0; i <= MAX_LOOKBACK_MONTHS && k <= monthKey; i++) {
+    const { year, month } = parseMonthKey(k);
+    const point: CardTrendData['points'][number] = { month: `${String(year).slice(2)}/${month}` };
+    const monthRows = expenses.filter((r) => r.month_key === k);
+    for (const cat of TREND_CATEGORIES) {
+      const e = matchCategoryRow(monthRows, cat);
+      point[cat.label] = e ? Number(e.amount) : undefined;
+    }
+    points.push(point);
+    k = shiftMonthKey(k, 1);
+  }
+
+  const medians: Record<string, number> = {};
+  const medianMonthCounts: Record<string, number> = {};
+  for (const cat of TREND_CATEGORIES) {
+    const m = cardMedianBudget(expenses, monthKey, cat.region, cat.label);
+    if (!m) continue;
+    medians[cat.label] = m.value;
+    medianMonthCounts[cat.label] = m.monthCount;
+  }
+
+  return { points, medians, medianMonthCounts, firstMonthKey };
 }
 
 /* ============================================================
@@ -385,19 +486,21 @@ function computeMonthTotals(
     return 0;
   }
 
+  const monthCategories = categoriesForMonth(monthKey);
+
   function budgetItemsForMonth(key: string): BudgetTabItem[] {
     let k = key;
     for (let i = 0; i <= MAX_LOOKBACK_MONTHS; i++) {
       const rows = budgetRows.filter((r) => r.month_key === k);
       if (rows.length > 0) {
-        return CATEGORIES.map((cat) => {
+        return monthCategories.map((cat) => {
           const m = matchCategoryRow(rows, cat);
           return { region: cat.region, label: cat.label, amount: m ? Number(m.amount) : 0 };
         });
       }
       k = shiftMonthKey(k, -1);
     }
-    return CATEGORIES.map((cat) => ({ region: cat.region, label: cat.label, amount: 0 }));
+    return monthCategories.map((cat) => ({ region: cat.region, label: cat.label, amount: 0 }));
   }
 
   const budgetItems = budgetItemsForMonth(monthKey);
@@ -407,9 +510,16 @@ function computeMonthTotals(
     budgetItems[taxIdx] = { region: '引き落とし金額', label: '税金等', amount: computeTaxMonthTotal(taxRows, monthKey) };
   }
 
+  for (let i = 0; i < monthCategories.length; i++) {
+    const cat = monthCategories[i];
+    if (!isTrendCard(cat.region, cat.label)) continue;
+    const median = cardMedianBudget(expenseRows, monthKey, cat.region, cat.label);
+    if (median) budgetItems[i] = { region: cat.region, label: cat.label, amount: median.value };
+  }
+
   const eRows = expenseRows.filter((r) => r.month_key === monthKey);
 
-  const items = CATEGORIES.map((cat, i) => {
+  const items = monthCategories.map((cat, i) => {
     const m = matchCategoryRow(eRows, cat);
     const budgetAmount = budgetItems[i].amount;
     return {
@@ -505,7 +615,7 @@ export function buildDashboardData(
     poolThisMonth,
     poolTotal,
     accounts: [
-      { name: '住信SBIネット銀行', amount: ideco },
+      { name: monthKey >= '2026-09' ? 'SBI新生銀行' : '住信SBIネット銀行', amount: ideco },
       { name: 'SBI証券', amount: kobetsu },
       { name: 'あおぞら銀行', amount: chokin },
       { name: '楽天銀行', amount: rakuten },

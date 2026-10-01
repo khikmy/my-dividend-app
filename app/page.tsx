@@ -18,12 +18,17 @@ import {
   ExpenseRow,
   IncomeRow,
   TaxRow,
-  CATEGORIES,
+  categoriesForMonth,
   REGIONS,
   isTaxCategory,
   buildDashboardData,
   buildExpenseTabData,
   buildTaxTabData,
+  buildCardTrend,
+  TREND_CARD_LABELS,
+  isTrendCard,
+  isMedianBudgetMonth,
+  cardMedianBudget,
   shiftMonthKey,
   parseMonthKey,
 } from '@/lib/budget';
@@ -71,6 +76,7 @@ export default function BudgetPage() {
   const [editItems, setEditItems] = useState<Record<string, { budget: string; expense: string }>>({});
   const [savingExpense, setSavingExpense] = useState(false);
   const [creatingNextMonth, setCreatingNextMonth] = useState(false);
+  const [trendModalLabel, setTrendModalLabel] = useState<string | null>(null);
 
   const [taxEditMode, setTaxEditMode] = useState(false);
   const [editPension, setEditPension] = useState('');
@@ -117,6 +123,7 @@ export default function BudgetPage() {
   useEffect(() => {
     setExpenseEditMode(false);
     setTaxEditMode(false);
+    setTrendModalLabel(null);
   }, [monthKey]);
 
   const dashboardData = useMemo(
@@ -128,6 +135,7 @@ export default function BudgetPage() {
     [monthKey, budgetRows, expenseRows, incomeRows, taxRows]
   );
   const taxData = useMemo(() => buildTaxTabData(year, taxRows), [year, taxRows]);
+  const cardTrend = useMemo(() => buildCardTrend(monthKey, expenseRows), [monthKey, expenseRows]);
 
   // 累計プール金の推移(対象年の1〜12月、計12ヶ月分)
   const poolTrend = useMemo(() => {
@@ -167,12 +175,12 @@ export default function BudgetPage() {
         .from('income_records')
         .upsert({ month_key: monthKey, amount: Number(editIncome) || 0 }, { onConflict: 'month_key' });
 
-      for (const cat of CATEGORIES) {
+      for (const cat of categoriesForMonth(monthKey)) {
         const key = `${cat.region}|${cat.label}`;
         const edit = editItems[key];
         if (!edit) continue;
 
-        if (!isTaxCategory(cat)) {
+        if (!isTaxCategory(cat) && !(isTrendCard(cat.region, cat.label) && isMedianBudgetMonth(monthKey))) {
           await supabase.from('budget_items').upsert(
             {
               month_key: monthKey,
@@ -233,6 +241,15 @@ export default function BudgetPage() {
       }
 
       for (const r of currentBudgetRows) {
+        // 適用開始月以降のカード3種・共有口座の支出額は、対象月までの実績の中央値を次月の予算にする(実績は未入力のままにする)
+        if (isTrendCard(r.region, r.label) && isMedianBudgetMonth(nextKey)) {
+          const median = cardMedianBudget(expenseRows, nextKey, r.region, r.label);
+          await supabase.from('budget_items').upsert(
+            { month_key: nextKey, region: r.region, label: r.label, amount: median ? median.value : r.amount },
+            { onConflict: 'month_key,region,label' }
+          );
+          continue;
+        }
         await supabase.from('budget_items').upsert(
           { month_key: nextKey, region: r.region, label: r.label, amount: r.amount },
           { onConflict: 'month_key,region,label' }
@@ -441,7 +458,7 @@ export default function BudgetPage() {
                   </tbody>
                 </table>
                 <p className="text-xs text-slate-400 mt-3">
-                  住信SBIネット銀行=iDeCoの支出額、SBI証券=個別株の支出額、あおぞら銀行=貯金の支出額、
+                  {dashboardData.accounts[0].name}=iDeCoの支出額、SBI証券=個別株の支出額、あおぞら銀行=貯金の支出額、
                   楽天銀行=共有口座(入金-出金、0未満は0)、三菱UFJ銀行=収入からその他4口座を差し引いた額です。
                   入力はできません。収入・各支出額は「支出」タブで編集してください。
                 </p>
@@ -520,14 +537,21 @@ export default function BudgetPage() {
                   totalExpense = totalSourceItems.reduce((s, i) => s + Number(i.amount), 0);
                   totalBudget = regionItems.reduce((s, i) => s + Number(i.budget), 0);
                 }
-                const totalLabel = region === '共有口座' ? '合計(支出-入金)' : '合計';
+                const totalBalance = region === '共有口座' ? totalExpense - totalBudget : totalBudget - totalExpense;
+                const totalLabel =region === '共有口座' ? '合計(支出-入金)' : '合計';
 
                 return (
                   <div key={region}>
                     <h3 className="text-xs font-bold text-slate-400 mb-2 mt-2">
                       {REGION_DISPLAY_NAMES[region] || region}
                     </h3>
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm table-fixed">
+                      <colgroup>
+                        <col className="w-[31%]" />
+                        <col className="w-[23%]" />
+                        <col className="w-[23%]" />
+                        <col className="w-[23%]" />
+                      </colgroup>
                       <thead>
                         <tr className="text-slate-400 text-xs">
                           <th className="text-left font-semibold pb-2">分類</th>
@@ -547,6 +571,11 @@ export default function BudgetPage() {
                         {visibleItems.map((item) => {
                           const key = `${item.region}|${item.label}`;
                           const isTaxCat = item.region === '引き落とし金額' && item.label === '税金等';
+                          const isAutoBudgetCard = isTrendCard(item.region, item.label) && isMedianBudgetMonth(monthKey);
+                          const isSharedWithdraw = item.region === '共有口座' && item.label === '支出額';
+                          const shownBalance = isSharedWithdraw
+                            ? Number(item.amount) - Number(item.budget)
+                            : item.balance;
                           return (
                             <tr key={key} className="border-t border-slate-100">
                               <td className="py-2 font-semibold text-slate-700">{item.label}</td>
@@ -571,6 +600,15 @@ export default function BudgetPage() {
                               <td className="py-2 text-right">
                                 {isTaxCat ? (
                                   <span className="font-semibold text-slate-800">{yen(item.budget)}</span>
+                                ) : isAutoBudgetCard ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setTrendModalLabel(item.label)}
+                                    title="押すと実績の推移グラフを表示します"
+                                    className="font-semibold text-blue-600 underline decoration-dotted underline-offset-4 hover:text-blue-800"
+                                  >
+                                    {yen(item.budget)}
+                                  </button>
                                 ) : expenseEditMode ? (
                                   <input
                                     type="number"
@@ -587,7 +625,9 @@ export default function BudgetPage() {
                                   <span className="font-semibold text-slate-800">{yen(item.budget)}</span>
                                 )}
                               </td>
-                              <td className={`py-2 text-right font-bold ${balClass(item.balance)}`}>{yen(item.balance)}</td>
+                              <td className={`py-2 text-right font-bold ${balClass(shownBalance)}`}>
+                                {yen(shownBalance)}
+                              </td>
                             </tr>
                           );
                         })}
@@ -595,15 +635,86 @@ export default function BudgetPage() {
                           <td className="py-2 text-slate-800">{totalLabel}</td>
                           <td className="py-2 text-right text-slate-800">{yen(totalExpense)}</td>
                           <td className="py-2 text-right text-slate-800">{yen(totalBudget)}</td>
-                          <td className={`py-2 text-right ${balClass(totalBudget - totalExpense)}`}>
-                            {yen(totalBudget - totalExpense)}
-                          </td>
+                          <td className={`py-2 text-right ${balClass(totalBalance)}`}>{yen(totalBalance)}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
                 );
               })}
+
+              {trendModalLabel && (() => {
+                const label = trendModalLabel;
+                const idx = TREND_CARD_LABELS.indexOf(label);
+                const color = ['#2563eb', '#16a34a', '#f59e0b', '#9333ea'][idx] ?? '#2563eb';
+                const median = cardTrend.medians[label];
+                return (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                    onClick={() => setTrendModalLabel(null)}
+                  >
+                    <div
+                      className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-1">
+                        <h3 className="text-base font-bold text-slate-800">{label}の支出推移</h3>
+                        <button
+                          type="button"
+                          onClick={() => setTrendModalLabel(null)}
+                          className="text-sm font-bold text-slate-400 hover:text-slate-600"
+                        >
+                          閉じる
+                        </button>
+                      </div>
+                      {median !== undefined && (
+                        <p className="text-xs text-slate-500 mb-3">
+                          点線=予算(対象月より前の実績の中央値) {yen(median)}({cardTrend.medianMonthCounts[label]}か月分)
+                        </p>
+                      )}
+                      <div className="h-64 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={cardTrend.points} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                            <XAxis
+                              dataKey="month"
+                              tick={{ fontSize: 12 }}
+                              tickLine={false}
+                              axisLine={{ stroke: '#e2e8f0' }}
+                            />
+                            <YAxis
+                              tickFormatter={(val) => `¥${(val / 10000).toLocaleString()}万`}
+                              tick={{ fontSize: 12 }}
+                              tickLine={false}
+                              axisLine={{ stroke: '#e2e8f0' }}
+                              width={64}
+                            />
+                            <Tooltip
+                              formatter={(val: number) => [yen(val), label]}
+                              contentStyle={{
+                                borderRadius: '12px',
+                                border: '1px solid #e2e8f0',
+                                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                              }}
+                            />
+                            {median !== undefined && (
+                              <ReferenceLine y={median} stroke={color} strokeDasharray="5 4" strokeWidth={1.5} />
+                            )}
+                            <Line
+                              type="monotone"
+                              dataKey={label}
+                              stroke={color}
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                              connectNulls
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
