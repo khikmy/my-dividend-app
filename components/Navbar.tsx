@@ -8,6 +8,7 @@ import {
   Coins,
   Wallet,
   Calculator,
+  Receipt,
   Menu,
   X
 } from 'lucide-react';
@@ -20,6 +21,7 @@ export default function Navbar() {
     { name: '資産管理', href: '/', icon: Wallet },
     { name: '配当金管理', href: '/dividend', icon: PieChart },
     { name: '保有外貨管理', href: '/forex', icon: Coins },
+    { name: '会計・経費', href: '/accounting', icon: Receipt },
     { name: '確定申告シミュレーション', href: '/tax-simulation', icon: Calculator },
   ];
 
