@@ -98,15 +98,16 @@ export function buildStatements(yearRows: JournalRow[]): Statements {
       .filter((a) => a.amount !== 0);
   const total = (l: { amount: number }[]) => l.reduce((s, a) => s + a.amount, 0);
 
-  const assets = pick('asset');
-  const liabilities = pick('liability');
+  // 青色申告の様式に合わせ、事業主貸は資産の部・事業主借は負債の部に表示する
+  const equityAll = pick('equity');
+  const assets = [...pick('asset'), ...equityAll.filter((a) => a.name === '事業主貸').map((a) => ({ ...a, amount: -a.amount }))];
+  const liabilities = [...pick('liability'), ...equityAll.filter((a) => a.name === '事業主借')];
   const revenues = pick('revenue');
   const expenses = pick('expense');
   const totalRevenue = total(revenues);
   const totalExpense = total(expenses);
   const netIncome = totalRevenue - totalExpense;
-  // 事業主貸は借方残高になるため、純資産(貸方−借方)では自然にマイナス表示になる
-  const equity = pick('equity');
+  const equity = equityAll.filter((a) => a.name !== '事業主貸' && a.name !== '事業主借');
   const totalEquity = total(equity) + netIncome;
 
   return {

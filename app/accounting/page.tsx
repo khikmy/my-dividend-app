@@ -487,7 +487,7 @@ export default function AccountingPage() {
                   <Item name="負債合計" amount={st.totalLiabilities} total />
                   <Section>純資産の部</Section>
                   {st.equity.map((a) => <Item key={a.name} {...a} />)}
-                  <Item name="当期純利益" amount={st.netIncome} />
+                  <Item name="控除前所得金額" amount={st.netIncome} />
                   <Item name="純資産合計" amount={st.totalEquity} total />
                   <Item name="負債・純資産合計" amount={st.totalLiabilities + st.totalEquity} total />
                 </tbody>
