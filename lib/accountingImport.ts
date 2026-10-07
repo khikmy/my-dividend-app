@@ -1,5 +1,5 @@
 // マネーフォワード等の仕訳帳CSV(Shift_JIS)を JournalRow に変換する。
-import { CAPITAL, JournalRow, isKnownAccount } from './accounting';
+import { CAPITAL, JournalRow, isKnownAccount, mergeSplitRows } from './accounting';
 
 /** ダブルクォート対応の簡易CSVパーサ */
 export function parseCsv(text: string): string[][] {
@@ -56,7 +56,7 @@ const num = (s: string | undefined) => Number((s ?? '').replace(/,/g, '')) || 0;
 
 export function buildImport(csvRows: string[][]): ImportPreview {
   const body = csvRows.slice(1).filter((r) => /^\d{4}\/\d{1,2}\/\d{1,2}$/.test(r[COL.date] ?? ''));
-  const rows: JournalRow[] = [];
+  const raw: JournalRow[] = [];
   const unknown = new Set<string>();
   let blankAccountRows = 0;
 
@@ -76,7 +76,7 @@ export function buildImport(csvRows: string[][]): ImportPreview {
     const debit = fix(r[COL.dAcc], debitAmount);
     const credit = fix(r[COL.cAcc], creditAmount);
     for (const a of [debit, credit]) if (a && !isKnownAccount(a)) unknown.add(a);
-    rows.push({
+    raw.push({
       group_id: `import-${y}-${r[COL.no]}`,
       entry_date: `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`,
       description: r[COL.desc] ?? '',
@@ -90,6 +90,7 @@ export function buildImport(csvRows: string[][]): ImportPreview {
     });
   }
 
+  const rows = mergeSplitRows(raw);
   const sums = new Map<string, number>();
   for (const r of rows) sums.set(r.group_id, (sums.get(r.group_id) ?? 0) + r.debit_amount - r.credit_amount);
   return {

@@ -4,7 +4,22 @@ export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expens
 
 const names = (type: AccountType, list: string[]) => list.map((name) => ({ name, type }));
 
-export const ACCOUNTS: { name: string; type: AccountType }[] = [
+export interface AccountDef {
+  name: string;
+  type: AccountType;
+}
+
+export const TYPE_LABEL: Record<AccountType, string> = {
+  asset: '資産',
+  liability: '負債',
+  equity: '純資産',
+  revenue: '収益',
+  expense: '費用',
+};
+export const TYPE_ORDER: AccountType[] = ['asset', 'liability', 'equity', 'revenue', 'expense'];
+
+// 初期値。DB(accounts テーブル)に登録済みなら setAccounts で置き換わる
+export const DEFAULT_ACCOUNTS: AccountDef[] = [
   ...names('asset', ['現金', '普通預金', '当座預金', '定期預金', '売掛金', '未収入金', '前払金', '立替金', '仮払金', '敷金・保証金', '敷金', '保証金', '差入保証金']),
   ...names('liability', ['未払金', '買掛金', '預り金', '仮受金', '前受金', '借入金', '未払費用']),
   ...names('equity', ['元入金', '事業主貸', '事業主借']),
@@ -16,6 +31,17 @@ export const ACCOUNTS: { name: string; type: AccountType }[] = [
   ]),
 ];
 
+export const ACCOUNTS: AccountDef[] = [...DEFAULT_ACCOUNTS];
+
+/** 科目マスタを差し替える(各関数は ACCOUNTS を参照するため、ロード後に1回呼ぶ) */
+export function setAccounts(list: AccountDef[]) {
+  ACCOUNTS.splice(0, ACCOUNTS.length, ...list);
+}
+
+// ロジックが名称で参照する科目。名称変更・削除・区分変更はできない
+export const PROTECTED_ACCOUNTS = ['元入金', '事業主貸', '事業主借'];
+
+export const OWNER_DRAW = '事業主貸';
 export const CAPITAL = '元入金';
 export const RECONCILE_ACCOUNTS = ['現金', '普通預金', '売掛金', '未払金', '預り金'];
 
@@ -36,6 +62,63 @@ export interface JournalRow {
   credit_sub?: string | null;
   credit_amount: number;
   kind: 'normal' | 'carryover';
+  mate_id?: number; // 統合表示した相手行のid
+}
+
+/** 同一取引内で、借方のみの行と貸方のみの行が同額なら1レコードに統合する(家事按分の事業主貸など) */
+export function mergeSplitRows(rows: JournalRow[]): JournalRow[] {
+  const out: JournalRow[] = [];
+  const pendingCredit = new Map<string, JournalRow[]>(); // 貸方のみ(未統合)
+  const pendingDebit = new Map<string, JournalRow[]>(); // 借方のみ(未統合)
+  const key = (r: JournalRow, amt: number) => `${r.group_id}	${amt}`;
+  const takeFrom = (m: Map<string, JournalRow[]>, k: string) => {
+    const list = m.get(k);
+    return list && list.length ? list.shift()! : undefined;
+  };
+  for (const r of rows) {
+    const debitOnly = r.debit_account && !r.credit_account && r.debit_amount > 0;
+    const creditOnly = r.credit_account && !r.debit_account && r.credit_amount > 0;
+    if (debitOnly) {
+      const mate = takeFrom(pendingCredit, key(r, r.debit_amount));
+      if (mate) {
+        Object.assign(mate, { mate_id: r.id, debit_account: r.debit_account, debit_sub: r.debit_sub ?? null, debit_amount: r.debit_amount });
+        continue;
+      }
+      const k = key(r, r.debit_amount);
+      const merged = { ...r };
+      out.push(merged);
+      pendingDebit.set(k, [...(pendingDebit.get(k) ?? []), merged]);
+    } else if (creditOnly) {
+      const mate = takeFrom(pendingDebit, key(r, r.credit_amount));
+      if (mate) {
+        Object.assign(mate, { mate_id: r.id, credit_account: r.credit_account, credit_sub: r.credit_sub ?? null, credit_amount: r.credit_amount });
+        continue;
+      }
+      const k = key(r, r.credit_amount);
+      const merged = { ...r };
+      out.push(merged);
+      pendingCredit.set(k, [...(pendingCredit.get(k) ?? []), merged]);
+    } else out.push(r);
+  }
+  return out;
+}
+
+/** 家事按分の対象仕訳か判定し、按分後の金額を返す。対象外(按分率なし・按分済みなど)は null */
+export function householdSplit(
+  r: JournalRow,
+  rows: JournalRow[],
+  ratioOf: (account: string, sub: string) => number | null | undefined
+): { ratio: number; business: number; personal: number } | null {
+  if (r.kind !== 'normal' || r.mate_id != null) return null;
+  if (!r.debit_account || !r.credit_account || !r.debit_sub) return null;
+  if (accountType(r.debit_account) !== 'expense') return null;
+  if (r.debit_amount <= 0 || r.debit_amount !== r.credit_amount) return null;
+  const ratio = ratioOf(r.debit_account, r.debit_sub);
+  if (ratio == null || ratio >= 100) return null;
+  // 同じ取引内に事業主貸の行があれば按分済み
+  if (rows.some((x) => x.group_id === r.group_id && x.id !== r.id && x.debit_account === OWNER_DRAW)) return null;
+  const business = Math.round((r.debit_amount * ratio) / 100);
+  return { ratio, business, personal: r.debit_amount - business };
 }
 
 export const yearOf = (r: JournalRow) => Number(r.entry_date.slice(0, 4));

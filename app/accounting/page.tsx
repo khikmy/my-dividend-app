@@ -1,12 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, X, Trash2, Upload } from 'lucide-react';
+import { Plus, X, Trash2, Upload, Pencil, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
   ACCOUNTS,
+  setAccounts,
+  AccountType,
   RECONCILE_ACCOUNTS,
   JournalRow,
+  mergeSplitRows,
+  householdSplit,
+  OWNER_DRAW,
   buildCarryover,
   buildStatements,
   accountType,
@@ -16,26 +21,18 @@ import {
   yearOf,
   yen,
 } from '@/lib/accounting';
+import AccountMaster, { SubAccount } from './AccountMaster';
 import { ImportPreview, buildImport, decodeCsvFile, parseCsv } from '@/lib/accountingImport';
 
-type Tab = 'input' | 'import' | 'list' | 'statements' | 'carry';
+type Tab = 'import' | 'list' | 'statements' | 'carry' | 'master';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'input', label: '仕訳入力' },
   { key: 'import', label: 'CSV取込' },
   { key: 'list', label: '仕訳一覧' },
   { key: 'statements', label: '貸借対照表・損益計算書' },
   { key: 'carry', label: '残高確認・繰越' },
+  { key: 'master', label: '科目マスタ' },
 ];
 
-interface Line {
-  debit: string;
-  debitSub: string;
-  debitAmount: string;
-  credit: string;
-  creditSub: string;
-  creditAmount: string;
-}
-const emptyLine = (): Line => ({ debit: '', debitSub: '', debitAmount: '', credit: '', creditSub: '', creditAmount: '' });
 const today = () => new Date().toISOString().slice(0, 10);
 
 const input = 'rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
@@ -61,10 +58,15 @@ function AccountSelect({
           <option key={a.name}>{a.name}</option>
         ))}
       </select>
-      <input className={`${input} w-28`} placeholder="補助科目" list="sub-accounts" value={sub} onChange={(e) => onSubChange(e.target.value)} />
+      <input className={`${input} w-28`} placeholder="補助科目" list={`sub-${value}`} value={sub} onChange={(e) => onSubChange(e.target.value)} />
     </div>
   );
 }
+
+// 繰越仕訳: 繰越機能で作成したもの、または1/1付けで損益科目(収益・費用)を含まないもの
+const isPl = (acc: string | null) => !!acc && ['revenue', 'expense'].includes(accountType(acc));
+const isCarryover = (r: JournalRow) =>
+  r.kind === 'carryover' || (r.entry_date.slice(5) === '01-01' && !isPl(r.debit_account) && !isPl(r.credit_account));
 
 const accLabel = (acc: string | null | undefined, sub: string | null | undefined) =>
   acc ? (sub ? `${acc}（${sub}）` : acc) : '';
@@ -87,18 +89,22 @@ function Item({ name, amount, total }: { name: string; amount: number; total?: b
 }
 
 export default function AccountingPage() {
-  const [tab, setTab] = useState<Tab>('input');
+  const [tab, setTab] = useState<Tab>('list');
   const [rows, setRows] = useState<JournalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [subs, setSubs] = useState<SubAccount[]>([]);
+  const [masterReady, setMasterReady] = useState(true);
+  const [masterEmpty, setMasterEmpty] = useState(false);
+  const [masterVersion, setMasterVersion] = useState(0); // 科目マスタ更新時に集計を再計算する
+  const [splitTarget, setSplitTarget] = useState<{ row: JournalRow; ratio: number; business: number; personal: number } | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
 
-  const [date, setDate] = useState(today());
-  const [desc, setDesc] = useState('');
-  const [lines, setLines] = useState<Line[]>([emptyLine()]);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-
+  const NEW_ID = -1; // 新規入力行
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editMsg, setEditMsg] = useState('');
+  const [draft, setDraft] = useState({ date: '', desc: '', debit: '', debitSub: '', credit: '', creditSub: '', amount: '' });
   const [monthFilter, setMonthFilter] = useState('');
   const [query, setQuery] = useState('');
 
@@ -111,28 +117,57 @@ export default function AccountingPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('journal_entries')
-      .select('*')
-      .order('entry_date', { ascending: false })
-      .order('id', { ascending: false });
+    // Supabase は1回の取得が最大1000行のため、ページ分けして全件読み込む
+    const PAGE = 1000;
+    const data: any[] = [];
+    let error: unknown = null;
+    for (let from = 0; ; from += PAGE) {
+      const res = await supabase
+        .from('journal_entries')
+        .select('*')
+        .order('entry_date', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (res.error) {
+        error = res.error;
+        break;
+      }
+      data.push(...(res.data ?? []));
+      if ((res.data ?? []).length < PAGE) break;
+    }
     if (error) {
       setLoadError('仕訳の読み込みに失敗しました。supabase/accounting.sql のテーブルを作成済みか確認してください。');
     } else {
       setLoadError('');
       setRows(
-        (data ?? []).map((r: any) => ({
-          ...r,
-          debit_amount: Number(r.debit_amount),
-          credit_amount: Number(r.credit_amount),
-        }))
+        mergeSplitRows(
+          (data ?? []).map((r: any) => ({
+            ...r,
+            debit_amount: Number(r.debit_amount),
+            credit_amount: Number(r.credit_amount),
+          }))
+        )
       );
     }
     setLoading(false);
   }, []);
+  const loadMaster = useCallback(async () => {
+    const [acc, sub] = await Promise.all([
+      supabase.from('accounts').select('name, type').order('sort_order').order('id'),
+      supabase.from('sub_accounts').select('*').order('id'),
+    ]);
+    setMasterReady(!acc.error);
+    const list = (acc.data ?? []) as { name: string; type: AccountType }[];
+    setMasterEmpty(!acc.error && list.length === 0);
+    // テーブル未作成・未登録の間は初期の科目で動作させる
+    if (list.length > 0) setAccounts(list);
+    setSubs(sub.error ? [] : ((sub.data ?? []) as SubAccount[]));
+    setMasterVersion((v) => v + 1);
+  }, []);
   useEffect(() => {
     load();
-  }, [load]);
+    loadMaster();
+  }, [load, loadMaster]);
 
   const years = useMemo(() => {
     const s = new Set<number>([new Date().getFullYear(), year]);
@@ -141,42 +176,78 @@ export default function AccountingPage() {
   }, [rows, year]);
   const yearRows = useMemo(() => rows.filter((r) => yearOf(r) === year), [rows, year]);
 
-  /* ---- 仕訳入力 ---- */
-  const debitTotal = lines.reduce((s, l) => s + (Number(l.debitAmount) || 0), 0);
-  const creditTotal = lines.reduce((s, l) => s + (Number(l.creditAmount) || 0), 0);
-  const balanced = debitTotal === creditTotal && debitTotal > 0;
-  const updateLine = (i: number, patch: Partial<Line>) =>
-    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  /* ---- 仕訳一覧のインライン編集 ---- */
+  const startEdit = (r: JournalRow) => {
+    setEditMsg('');
+    setEditId(r.id ?? null);
+    setDraft({
+      date: r.entry_date,
+      desc: r.description ?? '',
+      debit: r.debit_account ?? '',
+      debitSub: r.debit_sub ?? '',
+      credit: r.credit_account ?? '',
+      creditSub: r.credit_sub ?? '',
+      amount: String(r.debit_amount || r.credit_amount),
+    });
+  };
 
-  const save = async () => {
-    if (!balanced) return setMsg({ ok: false, text: '借方と貸方の合計を一致させてください' });
-    const bad = lines.some(
-      (l) => (Number(l.debitAmount) > 0) !== !!l.debit || (Number(l.creditAmount) > 0) !== !!l.credit
-    );
-    if (bad) return setMsg({ ok: false, text: '科目と金額はセットで入力してください' });
+  const startAdd = () => {
+    setEditMsg('');
+    setEditId(NEW_ID);
+    setDraft({ date: today().slice(0, 4) === String(year) ? today() : `${year}-12-31`, desc: '', debit: '', debitSub: '', credit: '', creditSub: '', amount: '' });
+  };
+
+  const cancelEdit = () => {
+    setEditId(null);
+    setEditMsg('');
+  };
+
+  const saveEdit = async (r: JournalRow | null) => {
+    const amount = Number(draft.amount) || 0;
+    if (!draft.date || amount <= 0) return setEditMsg('日付と金額を入力してください');
+    if (!draft.debit && !draft.credit) return setEditMsg('借方か貸方の科目を選択してください');
+    const next = {
+      entry_date: draft.date,
+      description: draft.desc,
+      debit_account: draft.debit || null,
+      debit_sub: draft.debit ? draft.debitSub || null : null,
+      debit_amount: draft.debit ? amount : 0,
+      credit_account: draft.credit || null,
+      credit_sub: draft.credit ? draft.creditSub || null : null,
+      credit_amount: draft.credit ? amount : 0,
+    };
+    if (!r) {
+      if (!draft.debit || !draft.credit) return setEditMsg('借方と貸方の科目を選択してください');
+      setSaving(true);
+      const { error: addError } = await supabase
+        .from('journal_entries')
+        .insert({ ...next, group_id: crypto.randomUUID(), kind: 'normal' });
+      setSaving(false);
+      if (addError) return setEditMsg('保存に失敗しました: ' + addError.message);
+      setEditMsg('');
+      setYear(Number(draft.date.slice(0, 4)));
+      // 続けて入力できるよう、新規行は日付を残して空にする
+      setDraft({ ...draft, desc: '', debit: '', debitSub: '', credit: '', creditSub: '', amount: '' });
+      load();
+      return;
+    }
+    // 取引内の貸借が一致することを確認する
+    const diff = rows
+      .filter((x) => x.group_id === r.group_id)
+      .reduce((sum, x) => {
+        const y = x.id === r.id ? next : x;
+        return sum + y.debit_amount - y.credit_amount;
+      }, 0);
+    if (diff !== 0) return setEditMsg(`この取引の貸借が一致しません（差額 ${yen(Math.abs(diff))}）`);
     setSaving(true);
-    const groupId = crypto.randomUUID();
-    const payload = lines
-      .filter((l) => l.debit || l.credit)
-      .map((l) => ({
-        group_id: groupId,
-        entry_date: date,
-        description: desc,
-        debit_account: l.debit || null,
-        debit_sub: l.debitSub || null,
-        debit_amount: Number(l.debitAmount) || 0,
-        credit_account: l.credit || null,
-        credit_sub: l.creditSub || null,
-        credit_amount: Number(l.creditAmount) || 0,
-        kind: 'normal',
-      }));
-    const { error } = await supabase.from('journal_entries').insert(payload);
+    const { error } = await supabase.from('journal_entries').update(next).eq('id', r.id);
+    if (!error && r.mate_id != null) await supabase.from('journal_entries').delete().eq('id', r.mate_id);
+    if (!error && next.entry_date !== r.entry_date)
+      await supabase.from('journal_entries').update({ entry_date: next.entry_date }).eq('group_id', r.group_id);
     setSaving(false);
-    if (error) return setMsg({ ok: false, text: '保存に失敗しました: ' + error.message });
-    setMsg({ ok: true, text: '仕訳を保存しました' });
-    setDesc('');
-    setLines([emptyLine()]);
-    setYear(Number(date.slice(0, 4)));
+    if (error) return setEditMsg('更新に失敗しました: ' + error.message);
+    setEditId(null);
+    setEditMsg('');
     load();
   };
 
@@ -186,11 +257,51 @@ export default function AccountingPage() {
     load();
   };
 
+  /* ---- 家事按分 ---- */
+  const ratioOf = (account: string, sub: string) => subs.find((s) => s.account === account && s.name === sub)?.business_ratio;
+  const splitOf = (r: JournalRow) => householdSplit(r, rows, ratioOf);
+
+  const runSplit = async () => {
+    if (!splitTarget) return;
+    const { row: r, business, personal } = splitTarget;
+    setSaving(true);
+    // 元の行を経費分に減額し、残りを事業主貸として同じ取引に追加する
+    const { error } = await supabase.from('journal_entries').update({ debit_amount: business, credit_amount: business }).eq('id', r.id);
+    const { error: addError } = error
+      ? { error }
+      : await supabase.from('journal_entries').insert({
+          group_id: r.group_id,
+          entry_date: r.entry_date,
+          description: r.description,
+          debit_account: OWNER_DRAW,
+          debit_sub: null,
+          debit_amount: personal,
+          credit_account: r.credit_account,
+          credit_sub: r.credit_sub ?? null,
+          credit_amount: personal,
+          kind: 'normal',
+        });
+    setSaving(false);
+    setSplitTarget(null);
+    if (addError) setEditMsg('家事按分に失敗しました: ' + addError.message);
+    else setEditMsg('');
+    load();
+  };
+
   /* ---- CSV取込 ---- */
-  const subOptions = useMemo(
-    () => [...new Set(rows.flatMap((r) => [r.debit_sub, r.credit_sub]).filter((v): v is string => !!v))],
-    [rows]
-  );
+  // 補助科目の入力候補: マスタ登録分 + 仕訳で使用済みのもの(科目ごと)
+  const subOptions = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    const add = (acc: string | null, sub?: string | null) => {
+      if (acc && sub) m.set(acc, (m.get(acc) ?? new Set()).add(sub));
+    };
+    subs.forEach((x) => add(x.account, x.name));
+    rows.forEach((r) => {
+      add(r.debit_account, r.debit_sub);
+      add(r.credit_account, r.credit_sub);
+    });
+    return [...m].map(([acc, set]) => ({ acc, list: [...set] }));
+  }, [rows, subs]);
 
   const onPickFile = async (file: File | undefined) => {
     setImportMsg(null);
@@ -206,7 +317,8 @@ export default function AccountingPage() {
     setImporting(true);
     // 取込済みの取引No(group_id)はスキップする
     const existing = new Set(rows.map((r) => r.group_id));
-    const fresh = preview.rows.filter((r) => !existing.has(r.group_id));
+    // mate_id は画面表示用の項目で、DBには列がないため除外する
+    const fresh = preview.rows.filter((r) => !existing.has(r.group_id)).map(({ mate_id, id, ...r }) => r);
     const skipped = new Set(preview.rows.filter((r) => existing.has(r.group_id)).map((r) => r.group_id)).size;
     for (let i = 0; i < fresh.length; i += 500) {
       const { error } = await supabase.from('journal_entries').insert(fresh.slice(i, i + 500));
@@ -230,7 +342,8 @@ export default function AccountingPage() {
   );
 
   /* ---- 財務諸表・残高 ---- */
-  const st = useMemo(() => buildStatements(yearRows), [yearRows]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const st = useMemo(() => buildStatements(yearRows), [yearRows, masterVersion]);
 
   // 帳簿残高は補助科目単位。現金・預金など基本の科目は残高0でも常に表示する
   const subSums = useMemo(() => sumByAccountSub(yearRows), [yearRows]);
@@ -272,6 +385,34 @@ export default function AccountingPage() {
     load();
   };
 
+  const editRow = (r: JournalRow | null) => (
+                      <tr key={r ? r.id : 'new'} className="bg-blue-50/60">
+                        <td className={td}>
+                          <input type="date" className={input} value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+                        </td>
+                        <td className={td}>
+                          <AccountSelect value={draft.debit} sub={draft.debitSub} onChange={(v) => setDraft({ ...draft, debit: v })} onSubChange={(v) => setDraft({ ...draft, debitSub: v })} />
+                        </td>
+                        <td className={td}>
+                          <AccountSelect value={draft.credit} sub={draft.creditSub} onChange={(v) => setDraft({ ...draft, credit: v })} onSubChange={(v) => setDraft({ ...draft, creditSub: v })} />
+                        </td>
+                        <td className={td}>
+                          <input type="number" min={0} className={`${input} w-28 text-right`} value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
+                        </td>
+                        <td className={td}>
+                          <input className={`${input} w-full min-w-[160px]`} value={draft.desc} onChange={(e) => setDraft({ ...draft, desc: e.target.value })} />
+                        </td>
+                        <td className={`${td} whitespace-nowrap`}>
+                          <button aria-label="保存" onClick={() => saveEdit(r)} disabled={saving} className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50">
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button aria-label="キャンセル" onClick={cancelEdit} className="p-1 text-slate-400 hover:text-slate-700">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -299,76 +440,54 @@ export default function AccountingPage() {
         ))}
       </div>
 
-      <datalist id="sub-accounts">
-        {subOptions.map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
+      {subOptions.map(({ acc, list }) => (
+        <datalist key={acc} id={`sub-${acc}`}>
+          {list.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+      ))}
+
+      {splitTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSplitTarget(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-semibold">家事按分を行いますか？</h2>
+            <p className="text-sm text-slate-600">
+              {splitTarget.row.entry_date.replace(/-/g, '/')} {splitTarget.row.description}
+            </p>
+            <table className="w-full text-sm">
+              <tbody>
+                <tr>
+                  <td className={td}>{accLabel(splitTarget.row.debit_account, splitTarget.row.debit_sub)}（経費 {splitTarget.ratio}%）</td>
+                  <td className={`${td} text-right tabular-nums`}>{yen(splitTarget.business)}</td>
+                </tr>
+                <tr>
+                  <td className={td}>{OWNER_DRAW}（{100 - splitTarget.ratio}%）</td>
+                  <td className={`${td} text-right tabular-nums`}>{yen(splitTarget.personal)}</td>
+                </tr>
+                <tr className="bg-slate-100 font-semibold">
+                  <td className={td}>合計（{splitTarget.row.credit_account}）</td>
+                  <td className={`${td} text-right tabular-nums`}>{yen(splitTarget.business + splitTarget.personal)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setSplitTarget(null)} className="rounded-lg border border-slate-300 text-sm px-4 py-2 hover:bg-slate-100">
+                キャンセル
+              </button>
+              <button onClick={runSplit} disabled={saving} className="rounded-lg bg-slate-900 text-white text-sm px-4 py-2 hover:opacity-85 disabled:opacity-50">
+                按分する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loadError && <p className="rounded-lg bg-red-50 text-red-700 text-sm p-3">{loadError}</p>}
 
       <section className="bg-white border border-slate-200 rounded-2xl p-5">
         {loading ? (
           <p className="text-sm text-slate-500">読み込み中...</p>
-        ) : tab === 'input' ? (
-          <div className="space-y-4">
-            <div className="grid gap-2 sm:grid-cols-[160px_1fr]">
-              <input type="date" className={input} value={date} onChange={(e) => setDate(e.target.value)} />
-              <input
-                className={input}
-                placeholder="摘要（例: Amazon 事務用品）"
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-              />
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[820px]">
-                <thead>
-                  <tr>
-                    <th className={th}>借方科目</th>
-                    <th className={`${th} text-right`}>借方金額</th>
-                    <th className={th}>貸方科目</th>
-                    <th className={`${th} text-right`}>貸方金額</th>
-                    <th className={th} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={i}>
-                      <td className={td}><AccountSelect value={l.debit} sub={l.debitSub} onChange={(v) => updateLine(i, { debit: v })} onSubChange={(v) => updateLine(i, { debitSub: v })} /></td>
-                      <td className={td}>
-                        <input type="number" min={0} className={`${input} w-28 text-right`} value={l.debitAmount} onChange={(e) => updateLine(i, { debitAmount: e.target.value })} />
-                      </td>
-                      <td className={td}><AccountSelect value={l.credit} sub={l.creditSub} onChange={(v) => updateLine(i, { credit: v })} onSubChange={(v) => updateLine(i, { creditSub: v })} /></td>
-                      <td className={td}>
-                        <input type="number" min={0} className={`${input} w-28 text-right`} value={l.creditAmount} onChange={(e) => updateLine(i, { creditAmount: e.target.value })} />
-                      </td>
-                      <td className={td}>
-                        {lines.length > 1 && (
-                          <button aria-label="行を削除" onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))} className="p-1 text-slate-400 hover:text-red-600">
-                            <X className="w-4 h-4" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <button onClick={() => setLines((ls) => [...ls, emptyLine()])} className={`${input} inline-flex items-center gap-1 hover:bg-slate-100`}>
-              <Plus className="w-4 h-4" />行を追加
-            </button>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className={`text-xs px-2 py-1 rounded-lg ${balanced ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                借方 {yen(debitTotal)} / 貸方 {yen(creditTotal)}
-                {balanced ? '貸借一致' : debitTotal === creditTotal ? '金額を入力' : `差額 ${yen(Math.abs(debitTotal - creditTotal))}`}
-              </span>
-              <button onClick={save} disabled={saving} className="rounded-lg bg-slate-900 text-white text-sm px-4 py-2 hover:opacity-85 disabled:opacity-50">
-                保存
-              </button>
-            </div>
-            {msg && <p className={`text-sm ${msg.ok ? 'text-green-700' : 'text-red-700'}`}>{msg.text}</p>}
-          </div>
         ) : tab === 'import' ? (
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
@@ -440,37 +559,74 @@ export default function AccountingPage() {
                 ))}
               </select>
               <input className={`${input} w-48`} placeholder="摘要・科目で検索" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <button
+                onClick={startAdd}
+                disabled={editId === NEW_ID}
+                className="ml-auto rounded-lg bg-slate-900 text-white text-sm px-3 py-1.5 inline-flex items-center gap-1 hover:opacity-85 disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4" />仕訳を追加
+              </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
+              <table className="w-full text-sm min-w-[900px]">
                 <thead>
                   <tr>
                     <th className={th}>日付</th>
-                    <th className={th}>摘要</th>
                     <th className={th}>借方</th>
                     <th className={th}>貸方</th>
                     <th className={`${th} text-right`}>金額</th>
+                    <th className={th}>摘要</th>
                     <th className={th} />
                   </tr>
                 </thead>
                 <tbody>
-                  {listed.map((r) => (
+                  {editId === NEW_ID && editRow(null)}
+                  {listed.map((r) =>
+                    r.id != null && r.id === editId ? (
+                      editRow(r)
+                    ) : (
                     <tr key={r.id}>
-                      <td className={td}>{r.entry_date.replace(/-/g, '/')}</td>
-                      <td className={td}>{r.description}</td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        {r.entry_date.replace(/-/g, '/')}
+                        {r.entry_date.slice(5) === '12-31' && (
+                          <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">決算整理</span>
+                        )}
+                        {(() => {
+                          const sp = splitOf(r);
+                          return (
+                            sp && (
+                              <button
+                                onClick={() => setSplitTarget({ row: r, ...sp })}
+                                className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 hover:bg-orange-200"
+                              >
+                                家事按分
+                              </button>
+                            )
+                          );
+                        })()}
+                        {isCarryover(r) && (
+                          <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-800">繰越</span>
+                        )}
+                      </td>
                       <td className={td}>{accLabel(r.debit_account, r.debit_sub)}</td>
                       <td className={td}>{accLabel(r.credit_account, r.credit_sub)}</td>
                       <td className={`${td} text-right tabular-nums`}>{yen(r.debit_amount || r.credit_amount)}</td>
-                      <td className={td}>
+                      <td className={td}>{r.description}</td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        <button aria-label="編集" onClick={() => startEdit(r)} className="p-1 text-slate-400 hover:text-blue-600">
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         <button aria-label="削除" onClick={() => remove(r.group_id)} className="p-1 text-slate-400 hover:text-red-600">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  )}
                 </tbody>
               </table>
             </div>
+            {editMsg && <p className="text-sm text-red-700">{editMsg}</p>}
             <p className="text-sm text-slate-500">{listed.length} 件</p>
           </div>
         ) : tab === 'statements' ? (
@@ -513,6 +669,8 @@ export default function AccountingPage() {
               </table>
             </div>
           </div>
+        ) : tab === 'master' ? (
+          <AccountMaster rows={rows} subs={subs} masterReady={masterReady} masterEmpty={masterEmpty} onChanged={() => { loadMaster(); load(); }} />
         ) : (
           <div className="space-y-4">
             <div className="overflow-x-auto">
