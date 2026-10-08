@@ -7,7 +7,6 @@ import {
   ACCOUNTS,
   setAccounts,
   AccountType,
-  RECONCILE_ACCOUNTS,
   JournalRow,
   mergeSplitRows,
   householdSplit,
@@ -15,6 +14,8 @@ import {
   buildCarryover,
   buildStatements,
   accountType,
+  CAPITAL,
+  needsReview,
   balanceFor,
   sumByAccount,
   sumByAccountSub,
@@ -22,7 +23,7 @@ import {
   yen,
 } from '@/lib/accounting';
 import AccountMaster, { SubAccount } from './AccountMaster';
-import { ImportPreview, buildImport, decodeCsvFile, parseCsv } from '@/lib/accountingImport';
+import { CARD_FORMATS, CardKind, ImportPreview, buildCardImport, buildImport, decodeCsvFile, parseCsv } from '@/lib/accountingImport';
 
 type Tab = 'import' | 'list' | 'statements' | 'carry' | 'master';
 const TABS: { key: Tab; label: string }[] = [
@@ -63,13 +64,56 @@ function AccountSelect({
   );
 }
 
-// 繰越仕訳: 繰越機能で作成したもの、または1/1付けで損益科目(収益・費用)を含まないもの
-const isPl = (acc: string | null) => !!acc && ['revenue', 'expense'].includes(accountType(acc));
-const isCarryover = (r: JournalRow) =>
-  r.kind === 'carryover' || (r.entry_date.slice(5) === '01-01' && !isPl(r.debit_account) && !isPl(r.credit_account));
+// 繰越仕訳: 繰越機能で作成したもの、または1/1付けで元入金を含む取引(開始仕訳)。1/1付けの通常の取引は対象外
+const isCarryover = (r: JournalRow, openingGroups: Set<string>) =>
+  r.kind === 'carryover' || (r.entry_date.slice(5) === '01-01' && openingGroups.has(r.group_id));
+
+// 決算整理: 12/31付けで事業主貸・事業主借を使う仕訳(按分・事業主勘定の振替など)。通常の取引は対象外
+const isSettlement = (r: JournalRow) =>
+  r.entry_date.slice(5) === '12-31' &&
+  [r.debit_account, r.credit_account].some((a) => a === '事業主貸' || a === '事業主借');
 
 const accLabel = (acc: string | null | undefined, sub: string | null | undefined) =>
   acc ? (sub ? `${acc}（${sub}）` : acc) : '';
+
+interface BalanceGroup {
+  name: string;
+  total: number;
+  leaves: { key: string; sub: string; book: number }[];
+}
+
+const cell = 'px-3 py-2 border-b border-slate-200 last:border-b-0';
+
+function BalanceTable({ groups }: { groups: BalanceGroup[] }) {
+  if (groups.length === 0) return <p className="text-sm text-slate-400 border border-slate-200 rounded-lg px-3 py-2">残高のある科目はありません</p>;
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden text-sm">
+      {groups.map((g) => (
+        <div key={g.name} className="border-b border-slate-200 last:border-b-0">
+          <div className="flex items-center justify-between gap-2 bg-slate-50 font-semibold">
+            <span className={cell}>{g.name}</span>
+            <span className={`${cell} tabular-nums`}>{g.total.toLocaleString('ja-JP')}</span>
+          </div>
+          {g.leaves.filter((l) => l.sub).map((l) => (
+            <div key={l.key} className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-1.5">
+              <span className="pl-4 font-medium">{l.sub}</span>
+              <span className="tabular-nums">{l.book.toLocaleString('ja-JP')}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BalanceTotal({ amount }: { amount: number }) {
+  return (
+    <div className="flex items-center justify-between border border-slate-200 rounded-lg bg-slate-50 font-semibold text-sm">
+      <span className={cell}>合計</span>
+      <span className={`${cell} tabular-nums`}>{amount.toLocaleString('ja-JP')}</span>
+    </div>
+  );
+}
 
 function Section({ children }: { children: React.ReactNode }) {
   return (
@@ -111,8 +155,9 @@ export default function AccountingPage() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [importing, setImporting] = useState(false);
+  // 取込対象: 'journal'=仕訳帳CSV、それ以外=カード明細CSV
+  const [importKind, setImportKind] = useState<'journal' | CardKind>('journal');
 
-  const [actual, setActual] = useState<Record<string, string>>({});
   const [carryMsg, setCarryMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -238,9 +283,12 @@ export default function AccountingPage() {
         const y = x.id === r.id ? next : x;
         return sum + y.debit_amount - y.credit_amount;
       }, 0);
-    if (diff !== 0) return setEditMsg(`この取引の貸借が一致しません（差額 ${yen(Math.abs(diff))}）`);
+    // 要確認の行は、科目が決まるまで貸借が揃わないため、科目未設定のままの保存は許可する
+    if (diff !== 0 && !(r.needs_review && !(draft.debit && draft.credit))) return setEditMsg(`この取引の貸借が一致しません（差額 ${yen(Math.abs(diff))}）`);
     setSaving(true);
-    const { error } = await supabase.from('journal_entries').update(next).eq('id', r.id);
+    // 借方・貸方の科目がそろったら「要確認」を解除する
+    const patch = r.needs_review && draft.debit && draft.credit ? { ...next, needs_review: false } : next;
+    const { error } = await supabase.from('journal_entries').update(patch).eq('id', r.id);
     if (!error && r.mate_id != null) await supabase.from('journal_entries').delete().eq('id', r.mate_id);
     if (!error && next.entry_date !== r.entry_date)
       await supabase.from('journal_entries').update({ entry_date: next.entry_date }).eq('group_id', r.group_id);
@@ -307,8 +355,13 @@ export default function AccountingPage() {
     setImportMsg(null);
     setPreview(null);
     if (!file) return;
-    const p = buildImport(parseCsv(await decodeCsvFile(file)));
-    if (p.rows.length === 0) return setImportMsg({ ok: false, text: '取り込める仕訳が見つかりませんでした。仕訳帳CSVか確認してください。' });
+    const csv = parseCsv(await decodeCsvFile(file));
+    const p = importKind === 'journal' ? buildImport(csv) : buildCardImport(csv, importKind);
+    if (p.rows.length === 0)
+      return setImportMsg({
+        ok: false,
+        text: `取り込める仕訳が見つかりませんでした。${importKind === 'journal' ? '仕訳帳CSV' : CARD_FORMATS[importKind].label + 'の明細CSV'}か確認してください。`,
+      });
     setPreview(p);
   };
 
@@ -335,6 +388,10 @@ export default function AccountingPage() {
   };
 
   /* ---- 仕訳一覧 ---- */
+  const openingGroups = useMemo(
+    () => new Set(yearRows.filter((r) => r.debit_account === CAPITAL || r.credit_account === CAPITAL).map((r) => r.group_id)),
+    [yearRows]
+  );
   const listed = yearRows.filter(
     (r) =>
       (!monthFilter || Number(r.entry_date.slice(5, 7)) === Number(monthFilter)) &&
@@ -345,32 +402,33 @@ export default function AccountingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const st = useMemo(() => buildStatements(yearRows), [yearRows, masterVersion]);
 
-  // 帳簿残高は補助科目単位。現金・預金など基本の科目は残高0でも常に表示する
+  // 繰り越される残高。資産・負債を勘定科目ごとにまとめ、補助科目別の行をぶら下げる(マネーフォワードの表示に合わせる)
   const subSums = useMemo(() => sumByAccountSub(yearRows), [yearRows]);
-  const reconcileKeys = useMemo(() => {
-    const keys = new Set<string>(RECONCILE_ACCOUNTS.map((n) => `${n}\t`));
-    for (const [k, v] of Object.entries(subSums)) {
-      const t = accountType(k.split('\t')[0]);
-      if ((t === 'asset' || t === 'liability') && balanceFor(t, v) !== 0) keys.add(k);
-    }
-    // 補助科目別の行がある科目は、補助なしの0円行を出さない
-    for (const k of [...keys]) {
-      const [name, sub] = k.split('\t');
-      if (!sub && [...keys].some((o) => o !== k && o.startsWith(`${name}\t`))) keys.delete(k);
-    }
-    return [...keys].sort();
+  const sections = useMemo(() => {
+    const build = (type: 'asset' | 'liability') => {
+      const byAccount = new Map<string, { sub: string; book: number }[]>();
+      for (const [k, v] of Object.entries(subSums)) {
+        const [name, sub] = k.split('\t');
+        const book = balanceFor(type, v);
+        if (accountType(name) !== type || book === 0) continue;
+        byAccount.set(name, [...(byAccount.get(name) ?? []), { sub, book }]);
+      }
+      const order = (n: string) => ACCOUNTS.findIndex((a) => a.name === n);
+      return [...byAccount.entries()]
+        .sort((x, y) => (order(x[0]) < 0 ? 999 : order(x[0])) - (order(y[0]) < 0 ? 999 : order(y[0])))
+        .map(([name, subs]) => ({
+          name,
+          total: subs.reduce((t, x) => t + x.book, 0),
+          // 補助科目なしの残高と補助科目別の残高が混在するときは、補助なしも1行として出す
+          leaves: subs.sort((x, y) => x.sub.localeCompare(y.sub, 'ja')).map((x) => ({ ...x, key: `${name}\t${x.sub}` })),
+        }));
+    };
+    const assets = build('asset');
+    const liabilities = build('liability');
+    const sum = (l: { total: number }[]) => l.reduce((t, x) => t + x.total, 0);
+    return { assets, liabilities, totalAssets: sum(assets), totalLiabilities: sum(liabilities) };
   }, [subSums]);
-  const diffs = reconcileKeys.map((key) => {
-    const [name, sub] = key.split('\t');
-    const book = balanceFor(accountType(name), subSums[key] ?? { debit: 0, credit: 0 });
-    const a = actual[key];
-    const diff = a === undefined || a === '' ? 0 : Number(a) - book;
-    return { key, name: accLabel(name, sub), book, diff };
-  });
-  const ngCount = diffs.filter((d) => d.diff !== 0).length;
-
   const carry = async () => {
-    if (ngCount > 0 && !confirm(`差異が ${ngCount} 件あります。このまま繰り越しますか？`)) return;
     if (!confirm(`${year + 1}年の繰越仕訳を作成します。既存の繰越仕訳があれば置き換えます。`)) return;
     const rowsNew = buildCarryover(yearRows, year + 1, crypto.randomUUID());
     await supabase
@@ -490,8 +548,27 @@ export default function AccountingPage() {
           <p className="text-sm text-slate-500">読み込み中...</p>
         ) : tab === 'import' ? (
           <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-slate-600">取込対象</span>
+              <select
+                className={input}
+                value={importKind}
+                onChange={(e) => {
+                  setImportKind(e.target.value as 'journal' | CardKind);
+                  setPreview(null);
+                  setImportMsg(null);
+                }}
+              >
+                <option value="journal">仕訳帳CSV（マネーフォワードなど）</option>
+                {(Object.keys(CARD_FORMATS) as CardKind[]).map((k) => (
+                  <option key={k} value={k}>{CARD_FORMATS[k].label}の明細CSV</option>
+                ))}
+              </select>
+            </div>
             <p className="text-sm text-slate-600">
-              マネーフォワードなどの仕訳帳CSV（Shift_JIS / UTF-8）を取り込みます。取引Noと取引年が同じ仕訳は取込済みとしてスキップするため、同じファイルを再度取り込んでも重複しません。
+              {importKind === 'journal'
+                ? 'マネーフォワードなどの仕訳帳CSV（Shift_JIS / UTF-8）を取り込みます。取引Noと取引年が同じ仕訳は取込済みとしてスキップするため、同じファイルを再度取り込んでも重複しません。'
+                : `${CARD_FORMATS[importKind].label}の明細CSV（Shift_JIS / UTF-8）を取り込みます。日付・金額・利用店名（摘要）を取り込み、借方の勘定科目は未設定、貸方は${CARD_FORMATS[importKind].creditAccount}（${CARD_FORMATS[importKind].creditSub}）にします。取り込んだ仕訳には「要確認」が付き、仕訳一覧で借方の科目を設定すると外れます。同じ日付・金額の明細は取込済みとしてスキップします。`}
             </p>
             <label className={`${input} inline-flex items-center gap-2 cursor-pointer hover:bg-slate-100`}>
               <Upload className="w-4 h-4" />CSVファイルを選択
@@ -501,6 +578,9 @@ export default function AccountingPage() {
               <div className="space-y-3">
                 <div className="text-sm rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-1">
                   <p>{preview.groupCount} 仕訳 / {preview.rows.length} 行（{preview.years.join('・')}年）</p>
+                  {importKind !== 'journal' && (
+                    <p>合計 {yen(preview.rows.reduce((t, r) => t + r.credit_amount - r.debit_amount, 0))}</p>
+                  )}
                   {preview.blankAccountRows > 0 && (
                     <p className="text-amber-700">科目が空欄で金額のある {preview.blankAccountRows} 行を「元入金」として取り込みます。</p>
                   )}
@@ -528,8 +608,8 @@ export default function AccountingPage() {
                         <tr key={i}>
                           <td className={td}>{r.entry_date.replace(/-/g, '/')}</td>
                           <td className={td}>{r.description}</td>
-                          <td className={td}>{accLabel(r.debit_account, r.debit_sub)}</td>
-                          <td className={td}>{accLabel(r.credit_account, r.credit_sub)}</td>
+                          <td className={td}>{r.needs_review && !r.debit_account ? '未設定' : accLabel(r.debit_account, r.debit_sub)}</td>
+                          <td className={td}>{r.needs_review && !r.credit_account ? '未設定' : accLabel(r.credit_account, r.credit_sub)}</td>
                           <td className={`${td} text-right tabular-nums`}>{r.debit_amount ? yen(r.debit_amount) : ''}</td>
                           <td className={`${td} text-right tabular-nums`}>{r.credit_amount ? yen(r.credit_amount) : ''}</td>
                         </tr>
@@ -588,7 +668,10 @@ export default function AccountingPage() {
                     <tr key={r.id}>
                       <td className={`${td} whitespace-nowrap`}>
                         {r.entry_date.replace(/-/g, '/')}
-                        {r.entry_date.slice(5) === '12-31' && (
+                        {needsReview(r) && (
+                          <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-800">要確認</span>
+                        )}
+                        {isSettlement(r) && (
                           <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">決算整理</span>
                         )}
                         {(() => {
@@ -604,7 +687,7 @@ export default function AccountingPage() {
                             )
                           );
                         })()}
-                        {isCarryover(r) && (
+                        {isCarryover(r, openingGroups) && (
                           <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-800">繰越</span>
                         )}
                       </td>
@@ -673,39 +756,23 @@ export default function AccountingPage() {
           <AccountMaster rows={rows} subs={subs} masterReady={masterReady} masterEmpty={masterEmpty} onChanged={() => { loadMaster(); load(); }} />
         ) : (
           <div className="space-y-4">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[520px]">
-                <thead>
-                  <tr>
-                    <th className={th}>科目</th>
-                    <th className={`${th} text-right`}>帳簿残高</th>
-                    <th className={`${th} text-right`}>実残高（通帳など）</th>
-                    <th className={`${th} text-right`}>差異</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {diffs.map((d) => (
-                    <tr key={d.key}>
-                      <td className={td}>{d.name}</td>
-                      <td className={`${td} text-right tabular-nums`}>{yen(d.book)}</td>
-                      <td className={`${td} text-right`}>
-                        <input
-                          type="number"
-                          className={`${input} w-32 text-right`}
-                          placeholder={String(d.book)}
-                          value={actual[d.key] ?? ''}
-                          onChange={(e) => setActual((a) => ({ ...a, [d.key]: e.target.value }))}
-                        />
-                      </td>
-                      <td className={`${td} text-right`}>
-                        <span className={`text-xs px-2 py-0.5 rounded-lg ${d.diff === 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                          {d.diff === 0 ? '一致' : (d.diff > 0 ? '+' : '') + yen(d.diff)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div>
+              <h2 className="font-semibold border-l-4 border-blue-400 pl-2">参考. 繰り越される残高</h2>
+              <p className="text-sm text-slate-500 mt-2">以下の残高が次年度の開始残高として繰り越されます。</p>
+            </div>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-sm text-slate-500">資産の部</p>
+                <BalanceTable groups={sections.assets} />
+                <BalanceTotal amount={sections.totalAssets} />
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm text-slate-500">負債の部</p>
+                <BalanceTable groups={sections.liabilities} />
+                <p className="text-sm text-slate-500 pt-2">資本の部</p>
+                <BalanceTable groups={[{ name: CAPITAL, total: sections.totalAssets - sections.totalLiabilities, leaves: [] }]} />
+                <BalanceTotal amount={sections.totalLiabilities + (sections.totalAssets - sections.totalLiabilities)} />
+              </div>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-slate-500">

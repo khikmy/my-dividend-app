@@ -43,7 +43,6 @@ export const PROTECTED_ACCOUNTS = ['元入金', '事業主貸', '事業主借'];
 
 export const OWNER_DRAW = '事業主貸';
 export const CAPITAL = '元入金';
-export const RECONCILE_ACCOUNTS = ['現金', '普通預金', '売掛金', '未払金', '預り金'];
 
 export const isKnownAccount = (name: string): boolean => ACCOUNTS.some((a) => a.name === name);
 
@@ -62,6 +61,7 @@ export interface JournalRow {
   credit_sub?: string | null;
   credit_amount: number;
   kind: 'normal' | 'carryover';
+  needs_review?: boolean; // カード明細などの取込分。科目が未設定の間は「要確認」
   mate_id?: number; // 統合表示した相手行のid
 }
 
@@ -236,3 +236,6 @@ export function buildCarryover(yearRows: JournalRow[], toYear: number, groupId: 
 }
 
 export const yen = (n: number) => (n < 0 ? '-' : '') + '¥' + Math.abs(Math.round(n)).toLocaleString('ja-JP');
+
+/** 「要確認」ラベルを出すか。取込分のうち、借方か貸方の科目が未設定のもの(設定されると自動で解除) */
+export const needsReview = (r: JournalRow) => !!r.needs_review && (!r.debit_account || !r.credit_account);

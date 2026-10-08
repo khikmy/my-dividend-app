@@ -102,3 +102,62 @@ export function buildImport(csvRows: string[][]): ImportPreview {
     years: [...new Set(rows.map((r) => Number(r.entry_date.slice(0, 4))))].sort(),
   };
 }
+
+/** クレジットカード明細CSVの型。取り込む対象を増やすときはここに追加する */
+export const CARD_FORMATS = {
+  NL: {
+    label: 'NLカード',
+    group: 'nl',
+    creditAccount: '未払金',
+    creditSub: 'NL',
+    // 明細CSVはヘッダーなし。0列目=利用日、1列目=利用店名、6列目=利用金額
+    dateCol: 0,
+    descCol: 1,
+    amountCol: 6,
+  },
+} as const;
+export type CardKind = keyof typeof CARD_FORMATS;
+
+/**
+ * カード明細CSVを仕訳に変換する。日付・金額・利用店名(摘要)を取り込み、借方の科目は未設定、
+ * 貸方はカードの未払金とする。取り込んだ行は「要確認」(needs_review)になる。
+ * 返金(マイナス金額)は貸借を逆にして、貸方を未設定とする。
+ */
+export function buildCardImport(csvRows: string[][], kind: CardKind): ImportPreview {
+  const f = CARD_FORMATS[kind];
+  const seen = new Map<string, number>();
+  const rows: JournalRow[] = [];
+  for (const r of csvRows) {
+    const m = (r[f.dateCol] ?? '').match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    const amount = num(r[f.amountCol]);
+    if (!m || amount === 0) continue;
+    const date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    // 同じ日付・金額の明細は出現順で区別し、同じファイルを再度取り込んでも重複しないようにする
+    const base = `${f.group}-${date}-${Math.abs(amount)}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    const abs = Math.abs(amount);
+    rows.push({
+      group_id: `${base}-${n}`,
+      entry_date: date,
+      // 全角英数を半角にそろえ、連続する空白を1つにする
+      description: (r[f.descCol] ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim(),
+      debit_account: amount < 0 ? f.creditAccount : null,
+      debit_sub: amount < 0 ? f.creditSub : null,
+      debit_amount: amount < 0 ? abs : 0,
+      credit_account: amount > 0 ? f.creditAccount : null,
+      credit_sub: amount > 0 ? f.creditSub : null,
+      credit_amount: amount > 0 ? abs : 0,
+      kind: 'normal',
+      needs_review: true,
+    });
+  }
+  return {
+    rows,
+    groupCount: rows.length,
+    unbalancedGroups: [],
+    unknownAccounts: [],
+    blankAccountRows: 0,
+    years: [...new Set(rows.map((r) => Number(r.entry_date.slice(0, 4))))].sort(),
+  };
+}

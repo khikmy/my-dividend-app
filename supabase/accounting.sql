@@ -42,3 +42,6 @@ alter table accounts enable row level security;
 alter table sub_accounts enable row level security;
 create policy "accounts anon all" on accounts for all using (true) with check (true);
 create policy "sub_accounts anon all" on sub_accounts for all using (true) with check (true);
+
+-- カード明細CSVの取込分に付ける「要確認」フラグ。すでにテーブルを作成済みの場合はこの1行だけ実行してください
+alter table journal_entries add column if not exists needs_review boolean not null default false;
