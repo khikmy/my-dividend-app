@@ -40,6 +40,7 @@ export default function AccountMaster({
 }) {
   const [msg, setMsg] = useState<Msg>(null);
   const [busy, setBusy] = useState(false);
+  const [showUnused, setShowUnused] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
 
   const [newName, setNewName] = useState('');
@@ -103,7 +104,10 @@ export default function AccountMaster({
     if (ACCOUNTS.some((a) => a.name === name)) return setMsg({ ok: false, text: `「${name}」は既に登録されています` });
     run(async () => {
       const { error } = await supabase.from('accounts').insert({ name, type: newType, sort_order: nextSort() });
-      if (!error) setNewName('');
+      if (!error) {
+        setNewName('');
+        setShowUnused(true); // 追加直後は未使用でも一覧に出す
+      }
       return error?.message ?? null;
     }, `「${name}」を追加しました`);
   };
@@ -246,6 +250,10 @@ export default function AccountMaster({
           <Plus className="w-4 h-4" />科目を追加
         </button>
       </div>
+      <label className="inline-flex items-center gap-1.5 text-sm text-slate-600">
+        <input type="checkbox" checked={showUnused} onChange={(e) => setShowUnused(e.target.checked)} />
+        仕訳で未使用の科目も表示
+      </label>
       {msg && <p className={`text-sm ${msg.ok ? 'text-green-700' : 'text-red-700'}`}>{msg.text}</p>}
 
       {(unregisteredAccounts.length > 0 || unregisteredSubs.length > 0) && (
@@ -272,7 +280,10 @@ export default function AccountMaster({
       )}
 
       {TYPE_ORDER.map((t) => {
-        const list = ACCOUNTS.filter((a) => a.type === t);
+        // 仕訳で1件も使われていない科目は既定で非表示(システム科目は常に表示)
+        const list = ACCOUNTS.filter(
+          (a) => a.type === t && (showUnused || accUse.has(a.name) || PROTECTED_ACCOUNTS.includes(a.name))
+        );
         if (list.length === 0) return null;
         return (
           <div key={t}>

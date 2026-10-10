@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X, Trash2, Upload, Pencil, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
@@ -51,14 +51,68 @@ function AccountSelect({
   onChange: (v: string) => void;
   onSubChange: (v: string) => void;
 }) {
+  // 入力しながら部分一致で候補を絞り込む。マスタにない値は赤枠にし、保存時にも弾く
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const ref = useRef<HTMLInputElement>(null);
+  const text = value.trim();
+  const candidates = ACCOUNTS.filter((a) => a.name.includes(text));
+  const invalid = text !== '' && !ACCOUNTS.some((a) => a.name === text);
+  const pick = (name: string) => {
+    onChange(name);
+    setOpen(false);
+  };
+  const rect = open ? ref.current?.getBoundingClientRect() : undefined; // 表の横スクロール枠に切られないよう fixed で表示
   return (
     <div className="flex gap-1">
-      <select className={`${input} w-full`} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">選択</option>
-        {ACCOUNTS.map((a) => (
-          <option key={a.name}>{a.name}</option>
-        ))}
-      </select>
+      <div className="w-full">
+        <input
+          ref={ref}
+          className={`${input} w-full ${invalid ? 'border-red-500 focus:ring-red-500' : ''}`}
+          placeholder="科目を入力・選択"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setActive(0);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setOpen(true);
+              setActive((i) => Math.min(i + 1, candidates.length - 1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActive((i) => Math.max(i - 1, 0));
+            } else if (e.key === 'Enter' && open && candidates[active]) {
+              e.preventDefault();
+              pick(candidates[active].name);
+            } else if (e.key === 'Escape') setOpen(false);
+          }}
+        />
+        {open && rect && candidates.length > 0 && (
+          <ul
+            className="fixed z-50 max-h-60 overflow-y-auto rounded-lg border border-slate-300 bg-white shadow-lg text-sm"
+            style={{ top: rect.bottom + 2, left: rect.left, minWidth: rect.width }}
+          >
+            {candidates.map((a, i) => (
+              <li
+                key={a.name}
+                // blur より先に確定させるため mousedown で選択する
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(a.name);
+                }}
+                className={`px-2.5 py-1.5 cursor-pointer ${i === active ? 'bg-blue-50' : 'hover:bg-slate-100'}`}
+              >
+                {a.name}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <input className={`${input} w-28`} placeholder="補助科目" list={`sub-${value}`} value={sub} onChange={(e) => onSubChange(e.target.value)} />
     </div>
   );
@@ -250,6 +304,10 @@ export default function AccountingPage() {
   const saveEdit = async (r: JournalRow | null) => {
     const amount = Number(draft.amount) || 0;
     if (!draft.date || amount <= 0) return setEditMsg('日付と金額を入力してください');
+    draft.debit = draft.debit.trim();
+    draft.credit = draft.credit.trim();
+    const unknown = [draft.debit, draft.credit].find((a) => a && !ACCOUNTS.some((x) => x.name === a));
+    if (unknown) return setEditMsg(`「${unknown}」は科目マスタに登録されていません。登録済みの科目を入力・選択してください`);
     if (!draft.debit && !draft.credit) return setEditMsg('借方か貸方の科目を選択してください');
     const next = {
       entry_date: draft.date,
