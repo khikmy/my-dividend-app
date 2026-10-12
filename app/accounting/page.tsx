@@ -9,8 +9,6 @@ import {
   AccountType,
   JournalRow,
   mergeSplitRows,
-  householdSplit,
-  OWNER_DRAW,
   buildCarryover,
   buildStatements,
   accountType,
@@ -23,14 +21,17 @@ import {
   yen,
 } from '@/lib/accounting';
 import AccountMaster, { SubAccount } from './AccountMaster';
-import { CARD_FORMATS, CardKind, ImportPreview, buildCardImport, buildImport, decodeCsvFile, parseCsv } from '@/lib/accountingImport';
+import SplitPanel from './SplitPanel';
+import StatementsView from './Statements';
+import { ImportPreview, STATEMENT_LABELS, StatementKind, buildImport, buildStatementImport, decodeCsvFile, parseCsv, statementNote } from '@/lib/accountingImport';
 
-type Tab = 'import' | 'list' | 'statements' | 'carry' | 'master';
+type Tab = 'import' | 'list' | 'split' | 'statements' | 'carry' | 'master';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'import', label: 'CSV取込' },
   { key: 'list', label: '仕訳一覧' },
   { key: 'statements', label: '貸借対照表・損益計算書' },
+  { key: 'split', label: '家事按分' },
   { key: 'carry', label: '残高確認・繰越' },
+  { key: 'import', label: 'CSV取込' },
   { key: 'master', label: '科目マスタ' },
 ];
 
@@ -169,23 +170,6 @@ function BalanceTotal({ amount }: { amount: number }) {
   );
 }
 
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <tr>
-      <td colSpan={2} className="pt-3 pb-1 text-xs text-slate-500">{children}</td>
-    </tr>
-  );
-}
-
-function Item({ name, amount, total }: { name: string; amount: number; total?: boolean }) {
-  return (
-    <tr className={total ? 'bg-slate-100 font-semibold' : ''}>
-      <td className={td}>{name}</td>
-      <td className={`${td} text-right tabular-nums`}>{yen(amount)}</td>
-    </tr>
-  );
-}
-
 export default function AccountingPage() {
   const [tab, setTab] = useState<Tab>('list');
   const [rows, setRows] = useState<JournalRow[]>([]);
@@ -195,7 +179,6 @@ export default function AccountingPage() {
   const [masterReady, setMasterReady] = useState(true);
   const [masterEmpty, setMasterEmpty] = useState(false);
   const [masterVersion, setMasterVersion] = useState(0); // 科目マスタ更新時に集計を再計算する
-  const [splitTarget, setSplitTarget] = useState<{ row: JournalRow; ratio: number; business: number; personal: number } | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
 
   const [saving, setSaving] = useState(false);
@@ -210,7 +193,7 @@ export default function AccountingPage() {
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [importing, setImporting] = useState(false);
   // 取込対象: 'journal'=仕訳帳CSV、それ以外=カード明細CSV
-  const [importKind, setImportKind] = useState<'journal' | CardKind>('journal');
+  const [importKind, setImportKind] = useState<'journal' | StatementKind>('journal');
 
   const [carryMsg, setCarryMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -365,34 +348,6 @@ export default function AccountingPage() {
 
   /* ---- 家事按分 ---- */
   const ratioOf = (account: string, sub: string) => subs.find((s) => s.account === account && s.name === sub)?.business_ratio;
-  const splitOf = (r: JournalRow) => householdSplit(r, rows, ratioOf);
-
-  const runSplit = async () => {
-    if (!splitTarget) return;
-    const { row: r, business, personal } = splitTarget;
-    setSaving(true);
-    // 元の行を経費分に減額し、残りを事業主貸として同じ取引に追加する
-    const { error } = await supabase.from('journal_entries').update({ debit_amount: business, credit_amount: business }).eq('id', r.id);
-    const { error: addError } = error
-      ? { error }
-      : await supabase.from('journal_entries').insert({
-          group_id: r.group_id,
-          entry_date: r.entry_date,
-          description: r.description,
-          debit_account: OWNER_DRAW,
-          debit_sub: null,
-          debit_amount: personal,
-          credit_account: r.credit_account,
-          credit_sub: r.credit_sub ?? null,
-          credit_amount: personal,
-          kind: 'normal',
-        });
-    setSaving(false);
-    setSplitTarget(null);
-    if (addError) setEditMsg('家事按分に失敗しました: ' + addError.message);
-    else setEditMsg('');
-    load();
-  };
 
   /* ---- CSV取込 ---- */
   // 補助科目の入力候補: マスタ登録分 + 仕訳で使用済みのもの(科目ごと)
@@ -414,23 +369,50 @@ export default function AccountingPage() {
     setPreview(null);
     if (!file) return;
     const csv = parseCsv(await decodeCsvFile(file));
-    const p = importKind === 'journal' ? buildImport(csv) : buildCardImport(csv, importKind);
+    const p = importKind === 'journal' ? buildImport(csv) : buildStatementImport(csv, importKind);
     if (p.rows.length === 0)
       return setImportMsg({
         ok: false,
-        text: `取り込める仕訳が見つかりませんでした。${importKind === 'journal' ? '仕訳帳CSV' : CARD_FORMATS[importKind].label + 'の明細CSV'}か確認してください。`,
+        text: `取り込める仕訳が見つかりませんでした。${importKind === 'journal' ? '仕訳帳CSV' : STATEMENT_LABELS[importKind] + 'の明細CSV'}か確認してください。`,
       });
     setPreview(p);
   };
 
+  // 明細CSV(カード・銀行)の重複判定。日付・金額・口座側の科目(補助科目)が同じ仕訳がすでにあれば重複とみなす。
+  // 同じ明細がN件あり既存がK件なら、先頭のK件だけを重複とする(同日同額の別の明細は取り込める)
+  const duplicateFlags = useMemo(() => {
+    if (!preview || importKind === 'journal') return null;
+    const key = (date: string, side: 'D' | 'C', acc: string | null, sub: string | null | undefined, amount: number) =>
+      `${date}|${side}|${acc}|${sub ?? ''}|${amount}`;
+    const counts = new Map<string, number>();
+    const add = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1);
+    for (const e of rows) {
+      if (e.debit_account) add(key(e.entry_date, 'D', e.debit_account, e.debit_sub, e.debit_amount));
+      if (e.credit_account) add(key(e.entry_date, 'C', e.credit_account, e.credit_sub, e.credit_amount));
+    }
+    return preview.rows.map((r) => {
+      const k = r.debit_account
+        ? key(r.entry_date, 'D', r.debit_account, r.debit_sub, r.debit_amount)
+        : key(r.entry_date, 'C', r.credit_account, r.credit_sub, r.credit_amount);
+      const left = counts.get(k) ?? 0;
+      if (left > 0) {
+        counts.set(k, left - 1);
+        return true;
+      }
+      return false;
+    });
+  }, [preview, importKind, rows]);
+  const duplicateCount = duplicateFlags ? duplicateFlags.filter(Boolean).length : 0;
+
   const runImport = async () => {
     if (!preview) return;
     setImporting(true);
-    // 取込済みの取引No(group_id)はスキップする
+    // 仕訳帳CSVは取込済みの取引No(group_id)、明細CSVは既存の仕訳と重複するものをスキップする
     const existing = new Set(rows.map((r) => r.group_id));
+    const isDup = (r: JournalRow, i: number) => (duplicateFlags ? duplicateFlags[i] : existing.has(r.group_id));
     // mate_id は画面表示用の項目で、DBには列がないため除外する
-    const fresh = preview.rows.filter((r) => !existing.has(r.group_id)).map(({ mate_id, id, ...r }) => r);
-    const skipped = new Set(preview.rows.filter((r) => existing.has(r.group_id)).map((r) => r.group_id)).size;
+    const fresh = preview.rows.filter((r, i) => !isDup(r, i)).map(({ mate_id, id, ...r }) => r);
+    const skipped = duplicateFlags ? duplicateCount : new Set(preview.rows.filter((r, i) => isDup(r, i)).map((r) => r.group_id)).size;
     for (let i = 0; i < fresh.length; i += 500) {
       const { error } = await supabase.from('journal_entries').insert(fresh.slice(i, i + 500));
       if (error) {
@@ -439,7 +421,7 @@ export default function AccountingPage() {
       }
     }
     setImporting(false);
-    setImportMsg({ ok: true, text: `${fresh.length} 行を取り込みました${skipped ? `（取込済みの ${skipped} 仕訳はスキップ）` : ''}` });
+    setImportMsg({ ok: true, text: `${fresh.length} 行を取り込みました${skipped ? `（重複する ${skipped} 件はスキップ）` : ''}` });
     setPreview(null);
     if (fresh.length) setYear(Number(fresh[0].entry_date.slice(0, 4)));
     load();
@@ -564,41 +546,6 @@ export default function AccountingPage() {
         </datalist>
       ))}
 
-      {splitTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSplitTarget(null)}>
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-semibold">家事按分を行いますか？</h2>
-            <p className="text-sm text-slate-600">
-              {splitTarget.row.entry_date.replace(/-/g, '/')} {splitTarget.row.description}
-            </p>
-            <table className="w-full text-sm">
-              <tbody>
-                <tr>
-                  <td className={td}>{accLabel(splitTarget.row.debit_account, splitTarget.row.debit_sub)}（経費 {splitTarget.ratio}%）</td>
-                  <td className={`${td} text-right tabular-nums`}>{yen(splitTarget.business)}</td>
-                </tr>
-                <tr>
-                  <td className={td}>{OWNER_DRAW}（{100 - splitTarget.ratio}%）</td>
-                  <td className={`${td} text-right tabular-nums`}>{yen(splitTarget.personal)}</td>
-                </tr>
-                <tr className="bg-slate-100 font-semibold">
-                  <td className={td}>合計（{splitTarget.row.credit_account}）</td>
-                  <td className={`${td} text-right tabular-nums`}>{yen(splitTarget.business + splitTarget.personal)}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setSplitTarget(null)} className="rounded-lg border border-slate-300 text-sm px-4 py-2 hover:bg-slate-100">
-                キャンセル
-              </button>
-              <button onClick={runSplit} disabled={saving} className="rounded-lg bg-slate-900 text-white text-sm px-4 py-2 hover:opacity-85 disabled:opacity-50">
-                按分する
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {loadError && <p className="rounded-lg bg-red-50 text-red-700 text-sm p-3">{loadError}</p>}
 
       <section className="bg-white border border-slate-200 rounded-2xl p-5">
@@ -612,21 +559,21 @@ export default function AccountingPage() {
                 className={input}
                 value={importKind}
                 onChange={(e) => {
-                  setImportKind(e.target.value as 'journal' | CardKind);
+                  setImportKind(e.target.value as 'journal' | StatementKind);
                   setPreview(null);
                   setImportMsg(null);
                 }}
               >
                 <option value="journal">仕訳帳CSV（マネーフォワードなど）</option>
-                {(Object.keys(CARD_FORMATS) as CardKind[]).map((k) => (
-                  <option key={k} value={k}>{CARD_FORMATS[k].label}の明細CSV</option>
+                {(Object.keys(STATEMENT_LABELS) as StatementKind[]).map((k) => (
+                  <option key={k} value={k}>{STATEMENT_LABELS[k]}の明細CSV</option>
                 ))}
               </select>
             </div>
             <p className="text-sm text-slate-600">
               {importKind === 'journal'
                 ? 'マネーフォワードなどの仕訳帳CSV（Shift_JIS / UTF-8）を取り込みます。取引Noと取引年が同じ仕訳は取込済みとしてスキップするため、同じファイルを再度取り込んでも重複しません。'
-                : `${CARD_FORMATS[importKind].label}の明細CSV（Shift_JIS / UTF-8）を取り込みます。日付・金額・利用店名（摘要）を取り込み、借方の勘定科目は未設定、貸方は${CARD_FORMATS[importKind].creditAccount}（${CARD_FORMATS[importKind].creditSub}）にします。取り込んだ仕訳には「要確認」が付き、仕訳一覧で借方の科目を設定すると外れます。同じ日付・金額の明細は取込済みとしてスキップします。`}
+                : statementNote(importKind)}
             </p>
             <label className={`${input} inline-flex items-center gap-2 cursor-pointer hover:bg-slate-100`}>
               <Upload className="w-4 h-4" />CSVファイルを選択
@@ -636,8 +583,15 @@ export default function AccountingPage() {
               <div className="space-y-3">
                 <div className="text-sm rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-1">
                   <p>{preview.groupCount} 仕訳 / {preview.rows.length} 行（{preview.years.join('・')}年）</p>
+                  {duplicateFlags && (
+                    <p className={duplicateCount > 0 ? 'text-amber-700' : ''}>
+                      {duplicateCount > 0
+                        ? `既存の仕訳と重複する ${duplicateCount} 件は取り込みません（取込は ${preview.rows.length - duplicateCount} 件）`
+                        : '既存の仕訳との重複はありません'}
+                    </p>
+                  )}
                   {importKind !== 'journal' && (
-                    <p>合計 {yen(preview.rows.reduce((t, r) => t + r.credit_amount - r.debit_amount, 0))}</p>
+                    <p>借方合計 {yen(preview.rows.reduce((t, r) => t + r.debit_amount, 0))} / 貸方合計 {yen(preview.rows.reduce((t, r) => t + r.credit_amount, 0))}</p>
                   )}
                   {preview.blankAccountRows > 0 && (
                     <p className="text-amber-700">科目が空欄で金額のある {preview.blankAccountRows} 行を「元入金」として取り込みます。</p>
@@ -663,9 +617,12 @@ export default function AccountingPage() {
                     </thead>
                     <tbody>
                       {preview.rows.slice(0, 100).map((r, i) => (
-                        <tr key={i}>
+                        <tr key={i} className={duplicateFlags?.[i] ? 'opacity-40' : ''}>
                           <td className={td}>{r.entry_date.replace(/-/g, '/')}</td>
-                          <td className={td}>{r.description}</td>
+                          <td className={td}>
+                            {r.description}
+                            {duplicateFlags?.[i] && <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">重複</span>}
+                          </td>
                           <td className={td}>{r.needs_review && !r.debit_account ? '未設定' : accLabel(r.debit_account, r.debit_sub)}</td>
                           <td className={td}>{r.needs_review && !r.credit_account ? '未設定' : accLabel(r.credit_account, r.credit_sub)}</td>
                           <td className={`${td} text-right tabular-nums`}>{r.debit_amount ? yen(r.debit_amount) : ''}</td>
@@ -678,7 +635,7 @@ export default function AccountingPage() {
                 {preview.rows.length > 100 && <p className="text-xs text-slate-500">先頭100行を表示しています</p>}
                 <button
                   onClick={runImport}
-                  disabled={importing || preview.unbalancedGroups.length > 0}
+                  disabled={importing || preview.unbalancedGroups.length > 0 || (!!duplicateFlags && duplicateCount === preview.rows.length)}
                   className="rounded-lg bg-slate-900 text-white text-sm px-4 py-2 hover:opacity-85 disabled:opacity-50"
                 >
                   {importing ? '取込中...' : '取り込む'}
@@ -732,19 +689,6 @@ export default function AccountingPage() {
                         {isSettlement(r) && (
                           <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">決算整理</span>
                         )}
-                        {(() => {
-                          const sp = splitOf(r);
-                          return (
-                            sp && (
-                              <button
-                                onClick={() => setSplitTarget({ row: r, ...sp })}
-                                className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 hover:bg-orange-200"
-                              >
-                                家事按分
-                              </button>
-                            )
-                          );
-                        })()}
                         {isCarryover(r, openingGroups) && (
                           <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-800">繰越</span>
                         )}
@@ -771,45 +715,9 @@ export default function AccountingPage() {
             <p className="text-sm text-slate-500">{listed.length} 件</p>
           </div>
         ) : tab === 'statements' ? (
-          <div className="grid gap-6 md:grid-cols-2">
-            <div>
-              <h2 className="font-semibold mb-1">貸借対照表</h2>
-              <table className="w-full text-sm">
-                <tbody>
-                  <Section>資産の部</Section>
-                  {st.assets.map((a) => <Item key={a.name} {...a} />)}
-                  <Item name="資産合計" amount={st.totalAssets} total />
-                  <Section>負債の部</Section>
-                  {st.liabilities.map((a) => <Item key={a.name} {...a} />)}
-                  <Item name="負債合計" amount={st.totalLiabilities} total />
-                  <Section>純資産の部</Section>
-                  {st.equity.map((a) => <Item key={a.name} {...a} />)}
-                  <Item name="控除前所得金額" amount={st.netIncome} />
-                  <Item name="純資産合計" amount={st.totalEquity} total />
-                  <Item name="負債・純資産合計" amount={st.totalLiabilities + st.totalEquity} total />
-                </tbody>
-              </table>
-              {st.totalAssets !== st.totalLiabilities + st.totalEquity && (
-                <p className="mt-2 text-xs text-amber-700">
-                  貸借が一致していません。年初の繰越仕訳（元入金）が未登録の可能性があります。
-                </p>
-              )}
-            </div>
-            <div>
-              <h2 className="font-semibold mb-1">損益計算書</h2>
-              <table className="w-full text-sm">
-                <tbody>
-                  <Section>収益</Section>
-                  {st.revenues.map((a) => <Item key={a.name} {...a} />)}
-                  <Item name="収益合計" amount={st.totalRevenue} total />
-                  <Section>費用</Section>
-                  {st.expenses.map((a) => <Item key={a.name} {...a} />)}
-                  <Item name="費用合計" amount={st.totalExpense} total />
-                  <Item name="当期純利益" amount={st.netIncome} total />
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <StatementsView st={st} rows={rows} year={year} />
+        ) : tab === 'split' ? (
+          <SplitPanel rows={rows} year={year} ratioOf={ratioOf} onChanged={load} />
         ) : tab === 'master' ? (
           <AccountMaster rows={rows} subs={subs} masterReady={masterReady} masterEmpty={masterEmpty} onChanged={() => { loadMaster(); load(); }} />
         ) : (

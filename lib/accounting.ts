@@ -61,6 +61,7 @@ export interface JournalRow {
   credit_sub?: string | null;
   credit_amount: number;
   kind: 'normal' | 'carryover';
+  split_done?: boolean; // 家事按分済み(事業主貸の行を追加した、または年次の按分仕訳で処理済み)
   needs_review?: boolean; // カード明細などの取込分。科目が未設定の間は「要確認」
   mate_id?: number; // 統合表示した相手行のid
 }
@@ -103,20 +104,31 @@ export function mergeSplitRows(rows: JournalRow[]): JournalRow[] {
   return out;
 }
 
-/** 家事按分の対象仕訳か判定し、按分後の金額を返す。対象外(按分率なし・按分済みなど)は null */
-export function householdSplit(
-  r: JournalRow,
-  rows: JournalRow[],
-  ratioOf: (account: string, sub: string) => number | null | undefined
-): { ratio: number; business: number; personal: number } | null {
+type RatioOf = (account: string, sub: string) => number | null | undefined;
+
+/** 家事按分の対象科目(補助科目に按分率が設定された経費)の仕訳なら、経費にする割合(%)を返す */
+export function householdRatio(r: JournalRow, ratioOf: RatioOf): number | null {
   if (r.kind !== 'normal' || r.mate_id != null) return null;
   if (!r.debit_account || !r.credit_account || !r.debit_sub) return null;
   if (accountType(r.debit_account) !== 'expense') return null;
   if (r.debit_amount <= 0 || r.debit_amount !== r.credit_amount) return null;
   const ratio = ratioOf(r.debit_account, r.debit_sub);
-  if (ratio == null || ratio >= 100) return null;
-  // 同じ取引内に事業主貸の行があれば按分済み
-  if (rows.some((x) => x.group_id === r.group_id && x.id !== r.id && x.debit_account === OWNER_DRAW)) return null;
+  return ratio == null || ratio >= 100 ? null : ratio;
+}
+
+/** 按分済みか。按分済みフラグ、または同じ取引内に事業主貸の行があるもの */
+export function isSplitDone(r: JournalRow, rows: JournalRow[]): boolean {
+  return !!r.split_done || rows.some((x) => x.group_id === r.group_id && x.id !== r.id && x.debit_account === OWNER_DRAW);
+}
+
+/** 未按分の家事按分対象か判定し、按分後の金額を返す。対象外(按分率なし・按分済みなど)は null */
+export function householdSplit(
+  r: JournalRow,
+  rows: JournalRow[],
+  ratioOf: RatioOf
+): { ratio: number; business: number; personal: number } | null {
+  const ratio = householdRatio(r, ratioOf);
+  if (ratio == null || isSplitDone(r, rows)) return null;
   const business = Math.round((r.debit_amount * ratio) / 100);
   return { ratio, business, personal: r.debit_amount - business };
 }

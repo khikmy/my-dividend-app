@@ -45,3 +45,6 @@ create policy "sub_accounts anon all" on sub_accounts for all using (true) with 
 
 -- カード明細CSVの取込分に付ける「要確認」フラグ。すでにテーブルを作成済みの場合はこの1行だけ実行してください
 alter table journal_entries add column if not exists needs_review boolean not null default false;
+
+-- 家事按分の「按分済み」フラグ。すでにテーブルを作成済みの場合はこの1行だけ実行してください
+alter table journal_entries add column if not exists split_done boolean not null default false;

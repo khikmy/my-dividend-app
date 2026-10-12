@@ -19,9 +19,9 @@ export function parseCsv(text: string): string[][] {
       if (ch === '"' && text[i + 1] === '"') {
         cell += '"';
         i++;
-      } else if (ch === '"') quoted = false;
+      } else if (ch === '"' && (i + 1 >= text.length || [',', '\n', '\r'].includes(text[i + 1]))) quoted = false;
       else cell += ch;
-    } else if (ch === '"') quoted = true;
+    } else if (ch === '"' && cell === '') quoted = true;
     else if (ch === ',') {
       row.push(cell);
       cell = '';
@@ -115,6 +115,18 @@ export const CARD_FORMATS = {
     descCol: 1,
     amountCol: 6,
   },
+  AGP: {
+    label: 'AGPカード',
+    group: 'agp',
+    creditAccount: '未払金',
+    creditSub: 'アメックス・ゴールド・プリファードカード',
+    // 明細CSVは1行目がヘッダー。0列目=ご利用日、2列目=ご利用内容、3列目=金額
+    dateCol: 0,
+    descCol: 2,
+    amountCol: 3,
+    // 銀行口座からの引き落とし行など、仕訳として取り込まない摘要
+    skipDesc: /前回分口座振替金額/,
+  },
 } as const;
 export type CardKind = keyof typeof CARD_FORMATS;
 
@@ -131,6 +143,7 @@ export function buildCardImport(csvRows: string[][], kind: CardKind): ImportPrev
     const m = (r[f.dateCol] ?? '').match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
     const amount = num(r[f.amountCol]);
     if (!m || amount === 0) continue;
+    if ('skipDesc' in f && f.skipDesc.test(r[f.descCol] ?? '')) continue;
     const date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
     // 同じ日付・金額の明細は出現順で区別し、同じファイルを再度取り込んでも重複しないようにする
     const base = `${f.group}-${date}-${Math.abs(amount)}`;
@@ -160,4 +173,89 @@ export function buildCardImport(csvRows: string[][], kind: CardKind): ImportPrev
     blankAccountRows: 0,
     years: [...new Set(rows.map((r) => Number(r.entry_date.slice(0, 4))))].sort(),
   };
+}
+
+/** 銀行口座の入出金明細CSVの型 */
+export const BANK_FORMATS = {
+  MUFG: {
+    label: '三菱UFJ銀行',
+    group: 'mufg',
+    account: '普通預金',
+    sub: '三菱UFJ銀行',
+    // 明細CSVは1行目がヘッダー。0列目=日付、1・2列目=摘要・摘要内容、3列目=支払い金額、4列目=預かり金額
+    dateCol: 0,
+    descCols: [1, 2],
+    outCol: 3,
+    inCol: 4,
+  },
+} as const;
+export type BankKind = keyof typeof BANK_FORMATS;
+
+/**
+ * 銀行の入出金明細CSVを仕訳に変換する。日付・金額・摘要を取り込み、口座側は普通預金(補助科目=銀行名)、
+ * 相手の科目は未設定とする。入金は借方=口座、出金は貸方=口座。取り込んだ行は「要確認」になる。
+ */
+export function buildBankImport(csvRows: string[][], kind: BankKind): ImportPreview {
+  const f = BANK_FORMATS[kind];
+  const seen = new Map<string, number>();
+  const rows: JournalRow[] = [];
+  for (const r of csvRows) {
+    const m = (r[f.dateCol] ?? '').match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    const out = num(r[f.outCol]);
+    const inc = num(r[f.inCol]);
+    if (!m || (out === 0 && inc === 0)) continue;
+    const date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    const isIn = inc > 0;
+    const amount = isIn ? inc : out;
+    // 同じ日付・入出金・金額の明細は出現順で区別し、同じファイルを再度取り込んでも重複しないようにする
+    const base = `${f.group}-${date}-${isIn ? 'in' : 'out'}-${amount}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    rows.push({
+      group_id: `${base}-${n}`,
+      entry_date: date,
+      description: f.descCols
+        .map((c) => (r[c] ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .join(' '),
+      debit_account: isIn ? f.account : null,
+      debit_sub: isIn ? f.sub : null,
+      debit_amount: isIn ? amount : 0,
+      credit_account: isIn ? null : f.account,
+      credit_sub: isIn ? null : f.sub,
+      credit_amount: isIn ? 0 : amount,
+      kind: 'normal',
+      needs_review: true,
+    });
+  }
+  return {
+    rows,
+    groupCount: rows.length,
+    unbalancedGroups: [],
+    unknownAccounts: [],
+    blankAccountRows: 0,
+    years: [...new Set(rows.map((r) => Number(r.entry_date.slice(0, 4))))].sort(),
+  };
+}
+
+/** 明細CSV(カード・銀行)の取込対象 */
+export type StatementKind = CardKind | BankKind;
+export const STATEMENT_LABELS: Record<StatementKind, string> = {
+  ...Object.fromEntries(Object.entries(CARD_FORMATS).map(([k, v]) => [k, v.label])),
+  ...Object.fromEntries(Object.entries(BANK_FORMATS).map(([k, v]) => [k, v.label])),
+} as Record<StatementKind, string>;
+
+export function buildStatementImport(csvRows: string[][], kind: StatementKind): ImportPreview {
+  return kind in BANK_FORMATS ? buildBankImport(csvRows, kind as BankKind) : buildCardImport(csvRows, kind as CardKind);
+}
+
+/** 取込画面に出す、明細CSVの取込内容の説明 */
+export function statementNote(kind: StatementKind): string {
+  const common = '取り込んだ仕訳には「要確認」が付き、仕訳一覧で未設定の科目を設定すると外れます。既存の仕訳と日付・金額・口座が同じ明細は重複とみなし、取り込みません。';
+  if (kind in BANK_FORMATS) {
+    const f = BANK_FORMATS[kind as BankKind];
+    return `${f.label}の入出金明細CSV（Shift_JIS / UTF-8）を取り込みます。日付・金額・摘要を取り込み、入金は借方、出金は貸方を${f.account}（${f.sub}）にして、相手の勘定科目は未設定にします。${common}`;
+  }
+  const f = CARD_FORMATS[kind as CardKind];
+  return `${f.label}の明細CSV（Shift_JIS / UTF-8）を取り込みます。日付・金額・利用店名（摘要）を取り込み、借方の勘定科目は未設定、貸方は${f.creditAccount}（${f.creditSub}）にします。${common}`;
 }
