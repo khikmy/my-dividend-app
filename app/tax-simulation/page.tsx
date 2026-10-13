@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Save, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { calculateTax } from '@/lib/tax';
+import { grossOf } from '@/lib/dividendImport';
 import { DividendRecord } from '@/types/database';
 
 export default function TaxSimulationPage() {
@@ -39,6 +40,7 @@ export default function TaxSimulationPage() {
               currency: st?.currency || (d.dividend_unit_usd > 0 ? 'USD' : 'JPY'),
               amount_tokutei: Number(d.amount_tokutei || 0),
               amount_nisa: Number(d.amount_nisa || 0),
+              gross_tokutei: d.gross_tokutei == null ? null : Number(d.gross_tokutei),
             };
           });
           setDividends(flat);
@@ -74,15 +76,11 @@ export default function TaxSimulationPage() {
 
   const { divJpyTokutei, divUsdJpyTokutei, taxResult } = useMemo(() => {
     const yearDivs = dividends.filter((d) => d.year === taxYear);
-    const jpyOri = yearDivs
-      .filter((d) => d.currency === 'JPY')
-      .reduce((acc, d) => acc + (d.amount_tokutei || 0), 0);
-    const usdOri = yearDivs
-      .filter((d) => d.currency === 'USD')
-      .reduce((acc, d) => acc + (d.amount_tokutei || 0), 0);
-
-    const jpyGross = Math.round((jpyOri * 100) / (100 - 20.315));
-    const usdGross = Math.round((usdOri * 100) / (100 - 28.3));
+    // 税引き前: CSV取込で保存した実額を優先し、なければ税引き後(特定口座)から逆算する
+    const sumGross = (cur: 'JPY' | 'USD') =>
+      Math.round(yearDivs.filter((d) => d.currency === cur).reduce((acc, d) => acc + grossOf(d), 0));
+    const jpyGross = sumGross('JPY');
+    const usdGross = sumGross('USD');
 
     const res = calculateTax({
       year: taxYear,

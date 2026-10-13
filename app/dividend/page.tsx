@@ -20,6 +20,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { DividendRecord } from '@/types/database';
 import StockList from '@/components/StockList';
+import DividendImport from '@/components/DividendImport';
 
 const COLORS = [
   '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#0d9488',
@@ -28,7 +29,7 @@ const COLORS = [
 ];
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'dividend' | 'stocks'>('dividend');
+  const [activeTab, setActiveTab] = useState<'dividend' | 'stocks' | 'import'>('dividend');
 
   // Data states
   const [dividends, setDividends] = useState<DividendRecord[]>([]);
@@ -293,6 +294,16 @@ export default function DashboardPage() {
           }`}
         >
           <span>保有銘柄一覧</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('import')}
+          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+            activeTab === 'import'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>配当金CSV取込</span>
         </button>
       </div>
 
@@ -575,6 +586,9 @@ export default function DashboardPage() {
       {/* TAB 2: STOCK LIST */}
       {/* ========================================================= */}
       {activeTab === 'stocks' && <StockList />}
+
+      {/* TAB 3: CSV IMPORT */}
+      {activeTab === 'import' && <DividendImport />}
     </div>
   );
 }

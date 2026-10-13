@@ -8,6 +8,18 @@ export interface Stock {
   updated_at?: string | null;
 }
 
+/** 証券会社1社分の月次配当(取込結果)。税引き後=net、税引き前=gross(円) */
+export interface BrokerDetail {
+  net_tokutei: number;
+  net_nisa: number;
+  gross_tokutei: number;
+  gross_nisa: number;
+  shares_tokutei: number;
+  shares_nisa: number;
+  /** 税引き前が税率からの逆算(推定)か。楽天の明細は実額 */
+  gross_estimated: boolean;
+}
+
 export interface DividendRecord {
   id?: number;
   ticker_code: string;
@@ -19,6 +31,10 @@ export interface DividendRecord {
   amount_tokutei: number;
   shares_nisa: number;
   amount_nisa: number;
+  // 税引き前(円)。CSV取込で保存。null/未設定なら税引き後からの逆算で代用する
+  gross_tokutei?: number | null;
+  gross_nisa?: number | null;
+  broker_detail?: Record<string, BrokerDetail> | null;
   created_at?: string;
   // Join stocks
   stocks?: Stock | Stock[];
