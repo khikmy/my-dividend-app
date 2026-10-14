@@ -138,7 +138,6 @@ export default function DividendImport() {
             </button>
           ))}
         </div>
-        <p className="text-xs text-slate-500">対象: {BROKERS[broker].hint}。Shift_JIS・UTF-8のどちらも読み込めます。</p>
         <label className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm cursor-pointer transition">
           <Upload className="w-4 h-4" />
           <span>CSVを選択</span>
@@ -154,7 +153,7 @@ export default function DividendImport() {
         </label>
         {fileName && <span className="ml-3 text-xs text-slate-500">{fileName}</span>}
         <div className="text-xs text-slate-400 leading-relaxed">
-          受取額(税引き後)は保有銘柄一覧・ダッシュボードに、税引き前は確定申告シミュレーションに反映されます。
+          受取額(税引き後)は保有銘柄一覧・ダッシュボードに、税引き前は税金画面のシミュレーションに反映されます。
           同じ証券会社のCSVを再取込すると、該当月の取込分は置き換わります(別の証券会社の分は合算)。
         </div>
       </div>
@@ -204,6 +203,11 @@ export default function DividendImport() {
             </div>
           </div>
 
+          {result.zeroAmountCount > 0 && (
+            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+              金額を読み取れず0円になる入金が{result.zeroAmountCount}件あります。CSVの形式が想定と違う可能性があるため、このまま取り込む前に内容を確認してください。
+            </div>
+          )}
           {hasEstimate && (
             <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
               ※ このCSVには税額がないため、税引き前は税率(国内20.315%・米国10%)からの逆算です(「推定」表示)。実額とは数十円ずれることがあります。
