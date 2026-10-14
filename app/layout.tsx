@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar';
 
 export const metadata: Metadata = {
   title: '資産管理アプリ | 配当金ダッシュボード',
-  description: '配当金・外貨・確定申告シミュレーション管理アプリケーション',
+  description: '配当金・外貨・税金管理アプリケーション',
 };
 
 export default function RootLayout({

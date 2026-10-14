@@ -3,8 +3,8 @@
 import { BrokerDetail, DividendRecord } from '@/types/database';
 
 export const BROKERS = {
-  SBI: { label: 'SBI証券', hint: '「分配金履歴」CSV(DISTRIBUTION_…csv)' },
-  RAKUTEN: { label: '楽天証券', hint: '「配当・分配金」CSV(dividendlist_…csv)' },
+  SBI: { label: 'SBI証券' },
+  RAKUTEN: { label: '楽天証券' },
 } as const;
 export type BrokerKind = keyof typeof BROKERS;
 
@@ -49,6 +49,8 @@ export interface ImportGroup {
 export interface DividendImportResult {
   groups: ImportGroup[];
   paymentCount: number;
+  /** 税引前または税引後が0円と読み取れた入金の件数(CSVの形式違いなどで金額を読めなかった可能性) */
+  zeroAmountCount: number;
 }
 
 const num = (s: string | undefined) => Number((s ?? '').replace(/,/g, '')) || 0;
@@ -99,9 +101,17 @@ function parseRakuten(csvRows: string[][]): Payment[] {
     if (!m || r.length < 14) continue;
     const currency: Currency = /ドル|USD/i.test((r[5] ?? '').normalize('NFKC')) ? 'USD' : 'JPY';
     const grossLocal = num(r[8]);
-    // 米国株は表示レートで円換算(税額の計算に使われているレート)
-    const gross = currency === 'USD' ? Math.round(grossLocal * num(r[11])) : Math.round(grossLocal);
-    const net = currency === 'USD' ? gross - num(r[9]) - num(r[12]) : Math.round(num(r[13]));
+    // 米国株は申告レート(税額の計算に使われているレート)で円換算。2024年分などは申告レートが「-」なので為替レートで代用する
+    const rate = num(r[11]) || num(r[10]);
+    const gross = currency === 'USD' ? Math.round(grossLocal * rate) : Math.round(grossLocal);
+    // 税額の列がある年は「税引前 − 外国税額 − 国内税額」、2024年分などで税額が「-」の年は税引後(外貨)を円換算する
+    const taxKnown = /\d/.test(r[12] ?? '');
+    const net =
+      currency === 'USD'
+        ? taxKnown
+          ? gross - num(r[9]) - num(r[12])
+          : Math.round(num(r[13]) * rate)
+        : Math.round(num(r[13]));
     out.push({
       year: Number(m[1]),
       month: Number(m[2]),
@@ -152,6 +162,7 @@ export function buildDividendImport(csvRows: string[][], broker: BrokerKind): Di
   return {
     groups: [...map.values()].sort((a, b) => a.year - b.year || a.month - b.month || a.ticker.localeCompare(b.ticker)),
     paymentCount: payments.length,
+    zeroAmountCount: payments.filter((p) => p.gross <= 0 || p.net <= 0).length,
   };
 }
 
