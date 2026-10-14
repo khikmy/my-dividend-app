@@ -20,9 +20,9 @@ export default function Navbar() {
   const navItems = [
     { name: '資産管理', href: '/', icon: Wallet },
     { name: '配当金管理', href: '/dividend', icon: PieChart },
-    { name: '保有外貨管理', href: '/forex', icon: Coins },
-    { name: '会計・経費', href: '/accounting', icon: Receipt },
-    { name: '確定申告シミュレーション', href: '/tax-simulation', icon: Calculator },
+    { name: '会計', href: '/accounting', icon: Receipt },
+    { name: '税金', href: '/tax', icon: Calculator },
+    { name: '外貨管理', href: '/forex', icon: Coins },
   ];
 
   return (

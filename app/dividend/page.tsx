@@ -10,9 +10,13 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  LineChart,
+  Line,
+  Legend,
   XAxis,
   YAxis,
   Tooltip,
+  CartesianGrid,
   PieChart,
   Pie,
   Cell,
@@ -140,21 +144,46 @@ export default function DashboardPage() {
     };
   }, [dividends, selectedYear, selectedMonth, selectedType, selectedStock]);
 
-  // Monthly breakdown chart data (1-12)
-  const monthlyChartData = useMemo(() => {
-    const months = Array.from({ length: 12 }, (_, i) => ({
-      month: `${i + 1}月`,
-      monthNum: i + 1,
-      total: 0,
-    }));
-    filteredRecords.forEach((d) => {
-      const idx = d.month - 1;
-      if (idx >= 0 && idx < 12) {
-        months[idx].total += (d.amount_tokutei || 0) + (d.amount_nisa || 0);
-      }
+  // 直近3年(表示年とその前2年)の月別配当金累積推移。年・月フィルタは無視し、銘柄タイプ/特定銘柄のみ反映
+  const cumulativeYears = useMemo(() => [selectedYear - 2, selectedYear - 1, selectedYear], [selectedYear]);
+  const monthlyByYear = useMemo(() => {
+    const monthly: Record<number, number[]> = {};
+    cumulativeYears.forEach((y) => (monthly[y] = Array(12).fill(0)));
+    dividends.forEach((d) => {
+      if (!monthly[d.year] || d.month < 1 || d.month > 12) return;
+      if (selectedType === '日本株' && d.currency !== 'JPY') return;
+      if (selectedType === '米国株' && d.currency !== 'USD') return;
+      if (selectedStock !== 'すべて' && (d.ticker_name || d.ticker_code) !== selectedStock) return;
+      monthly[d.year][d.month - 1] += (d.amount_tokutei || 0) + (d.amount_nisa || 0);
     });
-    return months;
-  }, [filteredRecords]);
+    return monthly;
+  }, [dividends, cumulativeYears, selectedType, selectedStock]);
+
+  const monthlyThreeYearData = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => {
+        const row: Record<string, number | string> = { month: `${i + 1}月` };
+        cumulativeYears.forEach((y) => (row[`y${y}`] = monthlyByYear[y][i]));
+        return row;
+      }),
+    [monthlyByYear, cumulativeYears]
+  );
+
+  const cumulativeChartData = useMemo(() => {
+    const monthly = monthlyByYear;
+    const now = new Date();
+    const running: Record<number, number> = {};
+    return Array.from({ length: 12 }, (_, i) => {
+      const row: Record<string, number | string | null> = { month: `${i + 1}月` };
+      cumulativeYears.forEach((y) => {
+        running[y] = (running[y] || 0) + monthly[y][i];
+        // 未来の月は線を伸ばさない
+        const isFuture = y > now.getFullYear() || (y === now.getFullYear() && i + 1 > now.getMonth() + 1);
+        row[`y${y}`] = isFuture ? null : running[y];
+      });
+      return row;
+    });
+  }, [monthlyByYear, cumulativeYears]);
 
   // Portfolio distribution (group by stock name)
   const portfolioData = useMemo(() => {
@@ -413,26 +442,36 @@ export default function DashboardPage() {
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-blue-600" />
-                <span>{selectedYear}年 月別配当金受取推移</span>
+                <span>{selectedYear}年 月別配当金受取推移(直近3年)</span>
               </h3>
               <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <BarChart data={monthlyThreeYearData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} textAnchor="middle" />
                     <YAxis
-                      tickFormatter={(val) => `¥${(val / 1000).toLocaleString()}k`}
+                      tickFormatter={(val) => `¥${val.toLocaleString()}`}
+                    width={80}
                       tickLine={false}
                       axisLine={{ stroke: '#e2e8f0' }}
                     />
                     <Tooltip
-                      formatter={(val: number) => [`¥ ${val.toLocaleString()}`, '受取額']}
+                      formatter={(val: number, name: string) => [`¥ ${val.toLocaleString()}`, name]}
                       contentStyle={{
                         borderRadius: '12px',
                         border: '1px solid #e2e8f0',
                         boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                       }}
                     />
-                    <Bar dataKey="total" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                    <Legend />
+                    {cumulativeYears.map((y, i) => (
+                      <Bar
+                        key={y}
+                        dataKey={`y${y}`}
+                        name={`${y}年`}
+                        fill={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
+                        radius={[4, 4, 0, 0]}
+                      />
+                    ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -496,6 +535,53 @@ export default function DashboardPage() {
                   該当データがありません
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Cumulative Line Chart (last 3 years) */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-blue-600" />
+              <span>直近3年 月別配当金累積推移</span>
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              {cumulativeYears[0]}〜{cumulativeYears[2]}年の1月からの累積受取額(
+              {selectedStock !== 'すべて' ? selectedStock : selectedType})
+            </p>
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={cumulativeChartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} />
+                  <YAxis
+                    tickFormatter={(val) => `¥${val.toLocaleString()}`}
+                    width={80}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <Tooltip
+                    formatter={(val: number, name: string) => [`¥ ${val.toLocaleString()}`, name]}
+                    contentStyle={{
+                      borderRadius: '12px',
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    }}
+                  />
+                  <Legend />
+                  {cumulativeYears.map((y, i) => (
+                    <Line
+                      key={y}
+                      type="monotone"
+                      dataKey={`y${y}`}
+                      name={`${y}年`}
+                      stroke={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
+                      strokeWidth={i === 2 ? 3 : 2}
+                      dot={{ r: 3 }}
+                      connectNulls={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
