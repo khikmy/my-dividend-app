@@ -17,12 +17,12 @@ export default function TaxPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-slate-800">税金</h1>
 
-      <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap">
+      <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden whitespace-nowrap">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
-            className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 ${
+            className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 ${
               activeTab === t.key
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'

@@ -187,7 +187,7 @@ export default function IncomeTrend({ rows, year }: { rows: JournalRow[]; year: 
       </div>
       <details className="text-sm">
         <summary className="cursor-pointer text-slate-500">表で見る</summary>
-        <div className="overflow-x-auto mt-2 border border-slate-200 rounded-lg">
+        <div className="overflow-x-auto overflow-y-hidden mt-2 border border-slate-200 rounded-lg">
           <table className="w-full text-sm min-w-[960px]">
             <thead>
               <tr>

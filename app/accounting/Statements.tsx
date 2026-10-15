@@ -140,7 +140,7 @@ function ProfitAndLoss({ st }: { st: Statements }) {
   return (
     <section className="space-y-3">
       <h2 className="font-semibold border-l-4 border-blue-400 pl-2">損益計算書</h2>
-      <div className="border border-slate-200 rounded-lg overflow-x-auto">
+      <div className="border border-slate-200 rounded-lg overflow-x-auto overflow-y-hidden">
         <table className="w-full text-sm min-w-[520px]">
           <thead>
             <tr>

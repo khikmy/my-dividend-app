@@ -219,7 +219,7 @@ export default function DividendImport() {
             </div>
           )}
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-hidden">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-400 border-b border-slate-100">

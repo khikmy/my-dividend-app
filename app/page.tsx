@@ -388,7 +388,7 @@ export default function BudgetPage() {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
                 <h2 className="text-base font-bold text-slate-800 mb-3">口座別内訳</h2>
-                <div className="overflow-x-auto"><table className="w-full text-sm min-w-[280px]">
+                <div className="overflow-x-auto overflow-y-hidden"><table className="w-full text-sm min-w-[280px]">
                   <thead>
                     <tr className="text-slate-400 text-xs">
                       <th className="text-left font-semibold pb-2">口座名</th>
@@ -492,7 +492,7 @@ export default function BudgetPage() {
                     <h3 className="text-xs font-bold text-slate-400 mb-2 mt-2">
                       {REGION_DISPLAY_NAMES[region] || region}
                     </h3>
-                    <div className="overflow-x-auto"><table className="w-full text-sm table-fixed min-w-[420px]">
+                    <div className="overflow-x-auto overflow-y-hidden"><table className="w-full text-sm table-fixed min-w-[420px]">
                       <colgroup>
                         <col className="w-[31%]" />
                         <col className="w-[23%]" />

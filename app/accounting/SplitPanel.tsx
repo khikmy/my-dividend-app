@@ -113,7 +113,7 @@ export default function SplitPanel({
         <p className="text-sm text-slate-500">
           科目マスタで補助科目に按分率を設定した経費が対象です。按分すると、経費分に減額し、残りを{OWNER_DRAW}に振り替えます。
         </p>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-hidden">
           <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr>
@@ -161,7 +161,7 @@ export default function SplitPanel({
 
       <section className="space-y-3">
         <h2 className="font-semibold">按分済（{done.length}件）</h2>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-hidden">
           <table className="w-full text-sm min-w-[680px]">
             <thead>
               <tr>

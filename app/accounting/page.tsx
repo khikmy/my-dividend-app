@@ -603,7 +603,7 @@ export default function AccountingPage() {
                     <p className="text-red-700">貸借が一致しない取引No: {preview.unbalancedGroups.join('、')}</p>
                   )}
                 </div>
-                <div className="overflow-x-auto max-h-72 overflow-y-auto border border-slate-200 rounded-lg">
+                <div className="overflow-x-auto max-h-[60vh] overflow-y-auto border border-slate-200 rounded-lg">
                   <table className="w-full text-sm min-w-[600px]">
                     <thead>
                       <tr>
@@ -662,7 +662,7 @@ export default function AccountingPage() {
                 <Plus className="w-4 h-4" />仕訳を追加
               </button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overflow-y-hidden">
               <table className="w-full text-sm min-w-[900px]">
                 <thead>
                   <tr>

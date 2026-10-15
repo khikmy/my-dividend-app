@@ -295,10 +295,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Tabs */}
-      <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap">
+      <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden whitespace-nowrap">
         <button
           onClick={() => setActiveTab('dividend')}
-          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'dividend'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -308,7 +308,7 @@ export default function DashboardPage() {
         </button>
         <button
           onClick={() => setActiveTab('stocks')}
-          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'stocks'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -318,7 +318,7 @@ export default function DashboardPage() {
         </button>
         <button
           onClick={() => setActiveTab('import')}
-          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'import'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
