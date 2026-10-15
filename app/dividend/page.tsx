@@ -436,47 +436,94 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Monthly Bar Chart */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-blue-600" />
-                <span>{selectedYear}年 月別配当金受取推移(直近3年)</span>
-              </h3>
-              <div className="h-72 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyThreeYearData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} textAnchor="middle" />
-                    <YAxis
-                      tickFormatter={(val) => `¥${val.toLocaleString()}`}
-                    width={80}
-                      tickLine={false}
-                      axisLine={{ stroke: '#e2e8f0' }}
+          {/* Monthly Bar Chart */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              <span>{selectedYear}年 月別配当金受取推移(直近3年)</span>
+            </h3>
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyThreeYearData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} textAnchor="middle" />
+                  <YAxis
+                    tickFormatter={(val) => `¥${val.toLocaleString()}`}
+                  width={80}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <Tooltip
+                    formatter={(val: number, name: string) => [`¥ ${val.toLocaleString()}`, name]}
+                    contentStyle={{
+                      borderRadius: '12px',
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    }}
+                  />
+                  <Legend />
+                  {cumulativeYears.map((y, i) => (
+                    <Bar
+                      key={y}
+                      dataKey={`y${y}`}
+                      name={`${y}年`}
+                      fill={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
+                      radius={[4, 4, 0, 0]}
                     />
-                    <Tooltip
-                      formatter={(val: number, name: string) => [`¥ ${val.toLocaleString()}`, name]}
-                      contentStyle={{
-                        borderRadius: '12px',
-                        border: '1px solid #e2e8f0',
-                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                      }}
-                    />
-                    <Legend />
-                    {cumulativeYears.map((y, i) => (
-                      <Bar
-                        key={y}
-                        dataKey={`y${y}`}
-                        name={`${y}年`}
-                        fill={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
-                        radius={[4, 4, 0, 0]}
-                      />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
             </div>
+          </div>
 
+          {/* Cumulative Line Chart (last 3 years) */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-blue-600" />
+              <span>直近3年 月別配当金累積推移</span>
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              {cumulativeYears[0]}〜{cumulativeYears[2]}年の1月からの累積受取額(
+              {selectedStock !== 'すべて' ? selectedStock : selectedType})
+            </p>
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={cumulativeChartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} />
+                  <YAxis
+                    tickFormatter={(val) => `¥${val.toLocaleString()}`}
+                    width={80}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <Tooltip
+                    formatter={(val: number, name: string) => [`¥ ${val.toLocaleString()}`, name]}
+                    contentStyle={{
+                      borderRadius: '12px',
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    }}
+                  />
+                  <Legend />
+                  {cumulativeYears.map((y, i) => (
+                    <Line
+                      key={y}
+                      type="monotone"
+                      dataKey={`y${y}`}
+                      name={`${y}年`}
+                      stroke={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
+                      strokeWidth={i === 2 ? 3 : 2}
+                      dot={{ r: 3 }}
+                      connectNulls={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Pie + Status Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Portfolio Distribution Pie Chart */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
@@ -536,92 +583,45 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Cumulative Line Chart (last 3 years) */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-blue-600" />
-              <span>直近3年 月別配当金累積推移</span>
-            </h3>
-            <p className="text-xs text-slate-400 mb-4">
-              {cumulativeYears[0]}〜{cumulativeYears[2]}年の1月からの累積受取額(
-              {selectedStock !== 'すべて' ? selectedStock : selectedType})
-            </p>
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={cumulativeChartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} />
-                  <YAxis
-                    tickFormatter={(val) => `¥${val.toLocaleString()}`}
-                    width={80}
-                    tickLine={false}
-                    axisLine={{ stroke: '#e2e8f0' }}
-                  />
-                  <Tooltip
-                    formatter={(val: number, name: string) => [`¥ ${val.toLocaleString()}`, name]}
-                    contentStyle={{
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                    }}
-                  />
-                  <Legend />
-                  {cumulativeYears.map((y, i) => (
-                    <Line
-                      key={y}
-                      type="monotone"
-                      dataKey={`y${y}`}
-                      name={`${y}年`}
-                      stroke={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
-                      strokeWidth={i === 2 ? 3 : 2}
-                      dot={{ r: 3 }}
-                      connectNulls={false}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Status Counts Metric Cards */}
-          <div>
-            <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+            {/* Status Counts Metric Cards */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
               <span>配当金ステータス状況</span>
               <span className="text-xs font-normal text-slate-400">
                 (前年同月比較)
               </span>
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <div className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   増配
                 </div>
                 <div className="text-2xl font-bold text-slate-900 mt-1">{statusCounts.inc} <small className="text-xs font-normal text-slate-500">銘柄</small></div>
               </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <div className="text-xs font-semibold text-rose-600 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-rose-500"></span>
                   減配
                 </div>
                 <div className="text-2xl font-bold text-slate-900 mt-1">{statusCounts.dec} <small className="text-xs font-normal text-slate-500">銘柄</small></div>
               </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <div className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-slate-400"></span>
                   維持
                 </div>
                 <div className="text-2xl font-bold text-slate-900 mt-1">{statusCounts.stay} <small className="text-xs font-normal text-slate-500">銘柄</small></div>
               </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <div className="text-xs font-semibold text-amber-600 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-amber-400"></span>
                   新規
                 </div>
                 <div className="text-2xl font-bold text-slate-900 mt-1">{statusCounts.newCnt} <small className="text-xs font-normal text-slate-500">銘柄</small></div>
               </div>
+            </div>
             </div>
           </div>
 
