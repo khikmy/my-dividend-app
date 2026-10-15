@@ -219,10 +219,10 @@ export default function ForexPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-200">
+      <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap">
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'dashboard'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -232,7 +232,7 @@ export default function ForexPage() {
         </button>
         <button
           onClick={() => setActiveTab('list')}
-          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'list'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
