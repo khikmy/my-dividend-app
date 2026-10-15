@@ -185,7 +185,7 @@ export default function TaxPayments() {
           </div>
 
           <h3 className="text-sm font-bold text-slate-700 pt-2">月別支払いスケジュール</h3>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[520px]">
             <thead>
               <tr className="text-slate-400 text-xs">
                 <th className="text-left font-semibold pb-2">月</th>
@@ -211,7 +211,7 @@ export default function TaxPayments() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 

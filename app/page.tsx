@@ -388,7 +388,7 @@ export default function BudgetPage() {
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
                 <h2 className="text-base font-bold text-slate-800 mb-3">口座別内訳</h2>
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto"><table className="w-full text-sm min-w-[280px]">
                   <thead>
                     <tr className="text-slate-400 text-xs">
                       <th className="text-left font-semibold pb-2">口座名</th>
@@ -403,7 +403,7 @@ export default function BudgetPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
                 <p className="text-xs text-slate-400 mt-3">
                   {dashboardData.accounts[0].name}=iDeCoの支出額、SBI証券=個別株の支出額、あおぞら銀行=貯金の支出額、
                   楽天銀行=共有口座(入金-出金、0未満は0)、三菱UFJ銀行=収入からその他4口座を差し引いた額です。
@@ -492,7 +492,7 @@ export default function BudgetPage() {
                     <h3 className="text-xs font-bold text-slate-400 mb-2 mt-2">
                       {REGION_DISPLAY_NAMES[region] || region}
                     </h3>
-                    <table className="w-full text-sm table-fixed">
+                    <div className="overflow-x-auto"><table className="w-full text-sm table-fixed min-w-[420px]">
                       <colgroup>
                         <col className="w-[31%]" />
                         <col className="w-[23%]" />
@@ -585,7 +585,7 @@ export default function BudgetPage() {
                           <td className={`py-2 text-right ${balClass(totalBalance)}`}>{yen(totalBalance)}</td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
                 );
               })}
@@ -601,7 +601,7 @@ export default function BudgetPage() {
                     onClick={() => setTrendModalLabel(null)}
                   >
                     <div
-                      className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl"
+                      className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 sm:p-5 shadow-xl"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-start justify-between gap-3 mb-1">

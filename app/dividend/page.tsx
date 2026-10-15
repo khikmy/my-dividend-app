@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   TrendingUp,
-  TrendingDown,
   Calendar,
 } from 'lucide-react';
 import {
@@ -107,7 +106,7 @@ export default function DashboardPage() {
   }, [dividends, selectedType]);
 
   // Filtered dataset for dividend summary
-  const { currentTotal, prevTotal, diff, filteredRecords } = useMemo(() => {
+  const { currentTotal, filteredRecords } = useMemo(() => {
     let base = dividends.map((d) => ({
       ...d,
       total_jpy: (d.amount_tokutei || 0) + (d.amount_nisa || 0),
@@ -120,26 +119,19 @@ export default function DashboardPage() {
     }
 
     let cur = 0;
-    let prev = 0;
     let filtered: typeof base = [];
 
     if (selectedMonth !== 'すべて') {
       const m = parseInt(selectedMonth.replace('月', ''), 10);
       filtered = base.filter((d) => d.year === selectedYear && d.month === m);
       cur = filtered.reduce((acc, d) => acc + d.total_jpy, 0);
-      const prevFiltered = base.filter((d) => d.year === selectedYear - 1 && d.month === m);
-      prev = prevFiltered.reduce((acc, d) => acc + d.total_jpy, 0);
     } else {
       filtered = base.filter((d) => d.year === selectedYear);
       cur = filtered.reduce((acc, d) => acc + d.total_jpy, 0);
-      const prevFiltered = base.filter((d) => d.year === selectedYear - 1);
-      prev = prevFiltered.reduce((acc, d) => acc + d.total_jpy, 0);
     }
 
     return {
       currentTotal: cur,
-      prevTotal: prev,
-      diff: cur - prev,
       filteredRecords: filtered,
     };
   }, [dividends, selectedYear, selectedMonth, selectedType, selectedStock]);
@@ -303,10 +295,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Tabs */}
-      <div className="flex border-b border-slate-200">
+      <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap">
         <button
           onClick={() => setActiveTab('dividend')}
-          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'dividend'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -316,7 +308,7 @@ export default function DashboardPage() {
         </button>
         <button
           onClick={() => setActiveTab('stocks')}
-          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'stocks'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -326,7 +318,7 @@ export default function DashboardPage() {
         </button>
         <button
           onClick={() => setActiveTab('import')}
-          className={`px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex items-center gap-2 ${
+          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition -mb-px flex-shrink-0 flex items-center gap-2 ${
             activeTab === 'import'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -416,23 +408,6 @@ export default function DashboardPage() {
               <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
                 ¥ {currentTotal.toLocaleString()}
               </span>
-              {availableYears.includes(selectedYear - 1) && (
-                <span
-                  className={`inline-flex items-center text-sm font-bold px-2.5 py-1 rounded-full ${
-                    diff >= 0
-                      ? 'bg-emerald-50 text-emerald-600'
-                      : 'bg-rose-50 text-rose-600'
-                  }`}
-                >
-                  {diff >= 0 ? (
-                    <TrendingUp className="w-4 h-4 mr-1" />
-                  ) : (
-                    <TrendingDown className="w-4 h-4 mr-1" />
-                  )}
-                  {diff >= 0 ? '+' : ''}
-                  {diff.toLocaleString()} 円 ({selectedMonth !== 'すべて' ? '前年同月比' : '前年比'})
-                </span>
-              )}
             </div>
           </div>
 
@@ -585,7 +560,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Status Counts Metric Cards */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col">
             <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
               <span>配当金ステータス状況</span>
               <span className="text-xs font-normal text-slate-400">
@@ -622,6 +597,49 @@ export default function DashboardPage() {
                 <div className="text-2xl font-bold text-slate-900 mt-1">{statusCounts.newCnt} <small className="text-xs font-normal text-slate-500">銘柄</small></div>
               </div>
             </div>
+
+            {/* 構成比バー */}
+            {(() => {
+              const items = [
+                { label: '増配', value: statusCounts.inc, bar: 'bg-emerald-500', text: 'text-emerald-600' },
+                { label: '減配', value: statusCounts.dec, bar: 'bg-rose-500', text: 'text-rose-600' },
+                { label: '維持', value: statusCounts.stay, bar: 'bg-slate-400', text: 'text-slate-600' },
+                { label: '新規', value: statusCounts.newCnt, bar: 'bg-amber-400', text: 'text-amber-600' },
+              ];
+              const total = items.reduce((sum, i) => sum + i.value, 0);
+              return (
+                <div className="mt-auto pt-6">
+                  <div className="text-xs font-semibold text-slate-500 mb-2">構成比(全{total}銘柄)</div>
+                  {total > 0 ? (
+                    <>
+                      <div className="flex h-16 w-full overflow-hidden rounded-xl bg-slate-100">
+                        {items.map((i) =>
+                          i.value > 0 ? (
+                            <div
+                              key={i.label}
+                              className={`${i.bar} flex items-center justify-center text-sm font-bold text-white`}
+                              style={{ width: `${(i.value / total) * 100}%` }}
+                              title={`${i.label} ${i.value}銘柄`}
+                            >
+                              {i.value / total >= 0.08 ? i.value : ''}
+                            </div>
+                          ) : null
+                        )}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        {items.map((i) => (
+                          <span key={i.label} className={`font-semibold ${i.text}`}>
+                            {i.label} {((i.value / total) * 100).toFixed(0)}%
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-xs text-slate-400">該当データがありません</div>
+                  )}
+                </div>
+              );
+            })()}
             </div>
           </div>
 
@@ -637,7 +655,7 @@ export default function DashboardPage() {
                     key={item.name}
                     className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <span
                         className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
                           idx === 0
@@ -651,9 +669,9 @@ export default function DashboardPage() {
                       >
                         {idx + 1}
                       </span>
-                      <span className="text-sm font-semibold text-slate-800">{item.name}</span>
+                      <span className="text-sm font-semibold text-slate-800 truncate">{item.name}</span>
                     </div>
-                    <span className="text-sm font-bold text-slate-900">
+                    <span className="text-sm font-bold text-slate-900 flex-shrink-0 ml-2">
                       ¥ {item.value.toLocaleString()}
                     </span>
                   </div>
