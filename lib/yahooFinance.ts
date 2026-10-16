@@ -14,7 +14,7 @@ export async function checkDividendStatus(
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
       symbol
-    )}?events=div&interval=1mo&range=3y`;
+    )}?events=div%7Csplit&interval=1mo&range=3y`;
 
     const res = await fetch(url, {
       headers: {
@@ -38,12 +38,22 @@ export async function checkDividendStatus(
       return { status: 'データなし', color: 'black', info: '配当履歴なし' };
     }
 
+    // 株式分割(日付と倍率)。Yahooは過去の配当を分割後の基準に換算して返すが、
+    // 分割と同日の配当は分割前の基準のままなので、比較前に同じ基準へそろえる
+    const splits: { time: number; ratio: number }[] = Object.values(data?.chart?.result?.[0]?.events?.splits ?? {})
+      .map((s: any) => ({
+        time: Number(s.date || 0),
+        ratio: Number(s.denominator) > 0 ? Number(s.numerator) / Number(s.denominator) : 1,
+      }))
+      .filter((s) => s.ratio > 0);
+
     // 配当リストを日付順にソート
     const divList: { date: Date; amount: number }[] = Object.values(dividendsObj)
-      .map((d: any) => ({
-        date: new Date((d.date || 0) * 1000),
-        amount: Number(d.amount || 0),
-      }))
+      .map((d: any) => {
+        const time = Number(d.date || 0);
+        const ratio = splits.filter((s) => Math.abs(s.time - time) < 86400).reduce((acc, s) => acc * s.ratio, 1);
+        return { date: new Date(time * 1000), amount: Number(d.amount || 0) / ratio };
+      })
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
     if (divList.length === 0) {

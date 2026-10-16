@@ -294,6 +294,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-slate-800">配当金管理</h1>
+
       {/* Tabs */}
       <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden whitespace-nowrap">
         <button

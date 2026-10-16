@@ -513,29 +513,30 @@ export default function AccountingPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-bold text-slate-800">会計（経費管理）</h1>
-        <select className={input} value={year} onChange={(e) => setYear(Number(e.target.value))}>
+      <h1 className="text-2xl font-bold text-slate-800">会計</h1>
+
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-slate-200">
+        <div className="flex overflow-x-auto overflow-y-hidden whitespace-nowrap">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
+                tab === t.key
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <select className={`${input} mb-2`} value={year} onChange={(e) => setYear(Number(e.target.value))}>
           {years.map((y) => (
             <option key={y} value={y}>{y}年</option>
           ))}
         </select>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-3.5 py-2 rounded-lg text-sm border transition ${
-              tab === t.key
-                ? 'bg-blue-50 text-blue-700 border-blue-600 font-semibold'
-                : 'bg-white border-slate-300 hover:bg-slate-100'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {subOptions.map(({ acc, list }) => (

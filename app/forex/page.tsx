@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import Link from 'next/link';
 import {
-  ArrowLeft,
   RefreshCw,
   PlusCircle,
   Edit2,
@@ -172,22 +170,48 @@ export default function ForexPage() {
       {/* Header Info */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">保有外貨管理</h1>
+          <h1 className="text-2xl font-bold text-slate-800">外貨管理</h1>
           <p className="text-xs text-slate-400 mt-0.5">
             為替レート状況最終更新日時: {lastUpdateStr}
           </p>
         </div>
+      </div>
+
+      {/* Message alert */}
+      {refreshMsg && (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 flex items-center gap-2 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+          <span>{refreshMsg}</span>
+        </div>
+      )}
+
+      {/* Tabs + Action buttons */}
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-slate-200">
+        <div className="flex overflow-x-auto overflow-y-hidden whitespace-nowrap">
+          <button
+            onClick={() => setActiveTab('dashboard')}
+            className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
+              activeTab === 'dashboard'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <span>ダッシュボード</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('list')}
+            className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
+              activeTab === 'list'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <span>保有外貨一覧</span>
+          </button>
+        </div>
 
         {/* Action buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/dividend"
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>配当金管理へ</span>
-          </Link>
-
+        <div className="flex flex-wrap items-center gap-2 pb-2">
           <button
             onClick={handleRefreshRates}
             disabled={refreshing}
@@ -208,38 +232,6 @@ export default function ForexPage() {
             <span>新規外貨金額を登録</span>
           </button>
         </div>
-      </div>
-
-      {/* Message alert */}
-      {refreshMsg && (
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 flex items-center gap-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
-          <span>{refreshMsg}</span>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden whitespace-nowrap">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
-            activeTab === 'dashboard'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <span>ダッシュボード</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('list')}
-          className={`px-3 sm:px-5 py-3 text-sm font-semibold border-b-2 transition flex-shrink-0 flex items-center gap-2 ${
-            activeTab === 'list'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <span>保有外貨一覧</span>
-        </button>
       </div>
 
       {loading ? (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Wallet, CheckCircle2 } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -266,12 +266,7 @@ export default function BudgetPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white">
-            <Wallet className="w-5 h-5" />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-800">資産管理(家計簿)</h1>
-        </div>
+        <h1 className="text-2xl font-bold text-slate-800">資産管理</h1>
       </div>
 
       {/* 月選択 */}

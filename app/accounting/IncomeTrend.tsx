@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, CartesianGrid, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { JournalRow, accountType, yen } from '@/lib/accounting';
 
 // 年ごとの色: 今年=緑、前年=青、前々年=オレンジ。棒は濃い色が控除前所得、薄い色が経費(同じ色の濃淡)
@@ -56,7 +56,6 @@ const K = {
   inc: (k: number) => `inc${k}`,
   exp: (k: number) => `exp${k}`,
   over: (k: number) => `over${k}`,
-  line: (k: number) => `line${k}`,
 };
 
 interface ChartRow {
@@ -102,7 +101,7 @@ function TrendTooltip({ active, payload, label, years }: { active?: boolean; pay
 
 /**
  * 控除前所得金額の推移(累計)。棒は3年分の累計売上高を「控除前所得(濃)」と「経費(薄)」に分けて積み上げたもの
- * (経費が売上を上回る間は超過分を赤で積む)。線は同じ色で3年分の累計所得。今年=緑、前年=青、前々年=オレンジ。
+ * (経費が売上を上回る間は超過分を赤で積む)。今年=緑、前年=青、前々年=オレンジ。
  */
 export default function IncomeTrend({ rows, year }: { rows: JournalRow[]; year: number }) {
   const { data, years } = useMemo(() => {
@@ -126,7 +125,6 @@ export default function IncomeTrend({ rows, year }: { rows: JournalRow[]; year: 
         row[K.inc(k)] = c ? Math.max(base - c.exp, 0) : null;
         row[K.exp(k)] = c ? Math.max(Math.min(c.exp, base), 0) : null;
         row[K.over(k)] = c ? Math.max(c.exp - base, 0) : null;
-        row[K.line(k)] = c ? c.inc : null;
       });
       return row;
     });
@@ -137,21 +135,20 @@ export default function IncomeTrend({ rows, year }: { rows: JournalRow[]; year: 
     <section className="space-y-3">
       <h2 className="font-semibold border-l-4 border-blue-400 pl-2">控除前所得金額の推移（累計）</h2>
       <p className="text-sm text-slate-500">
-        棒は累計の売上高を、控除前所得（濃い色）と経費（薄い色）に分けて積み上げたもので、高さが売上高です。線は累計の控除前所得です。
+        棒は累計の売上高を、控除前所得（濃い色）と経費（薄い色）に分けて積み上げたもので、高さが売上高です。
       </p>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs" style={{ color: INK_2 }}>
         {years.map((y, k) => (
           <span key={y} className="inline-flex items-center gap-1.5">
             <Swatch color={YEAR_STYLE[k].color} />
             <Swatch color={YEAR_STYLE[k].tint} />
-            <Swatch color={YEAR_STYLE[k].color} dashed={k > 0} />
             <span style={{ color: INK }}>{y}年</span>
           </span>
         ))}
         <span className="inline-flex items-center gap-1.5">
           <Swatch color={OVER} />経費超過（赤字）
         </span>
-        <span>濃い棒=控除前所得 / 薄い棒=経費 / 線=累計の所得（過去2年は点線）</span>
+        <span>濃い棒=控除前所得 / 薄い棒=経費</span>
       </div>
       <div className="border border-slate-200 rounded-lg p-3">
         <div className="h-80">
@@ -167,20 +164,6 @@ export default function IncomeTrend({ rows, year }: { rows: JournalRow[]; year: 
                 <Bar key={K.exp(k)} dataKey={K.exp(k)} stackId={`s${k}`} fill={YEAR_STYLE[k].tint} stroke="#fff" strokeWidth={1.5} radius={[3, 3, 0, 0]} isAnimationActive={false} />,
                 <Bar key={K.over(k)} dataKey={K.over(k)} stackId={`s${k}`} fill={OVER} stroke="#fff" strokeWidth={1.5} radius={[3, 3, 0, 0]} isAnimationActive={false} />,
               ])}
-              {[2, 1, 0].map((k) => (
-                <Line
-                  key={K.line(k)}
-                  dataKey={K.line(k)}
-                  type="monotone"
-                  stroke={YEAR_STYLE[k].color}
-                  strokeWidth={2}
-                  strokeDasharray={YEAR_STYLE[k].dashed}
-                  dot={k === 0 ? { r: 3, strokeWidth: 2, stroke: '#fff' } : false}
-                  activeDot={{ r: 5 }}
-                  connectNulls={false}
-                  isAnimationActive={false}
-                />
-              ))}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
