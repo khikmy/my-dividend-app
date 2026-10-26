@@ -16,6 +16,50 @@ import { DividendRecord, Stock } from '@/types/database';
 import DividendModal from '@/components/DividendModal';
 import ConfirmModal from '@/components/ConfirmModal';
 
+const TREND_PERIODS: { key: 'price_1m' | 'price_3m' | 'price_6m' | 'price_1y'; label: string }[] = [
+  { key: 'price_1m', label: '1ヶ月前' },
+  { key: 'price_3m', label: '3ヶ月前' },
+  { key: 'price_6m', label: '6ヶ月前' },
+  { key: 'price_1y', label: '1年前' },
+];
+
+/** 現在株価と、各期間前の株価に対する騰落率を表示(上昇=緑、下落=赤) */
+function PriceTrend({ stock, currency }: { stock?: Stock; currency: 'JPY' | 'USD' }) {
+  const current = stock?.price_current;
+  if (current == null) {
+    return <div className="text-[11px] text-slate-400 mt-1">株価未取得（「最新株価情報を更新」で取得）</div>;
+  }
+  const fmt = (v: number) =>
+    currency === 'JPY' ? `¥${Math.round(v).toLocaleString()}` : `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[11px]">
+      <span className="font-bold text-slate-700">現在 {fmt(current)}</span>
+      {TREND_PERIODS.map(({ key, label }) => {
+        const past = stock?.[key];
+        if (past == null || past <= 0) {
+          return (
+            <span key={key} className="text-slate-400">
+              {label} -
+            </span>
+          );
+        }
+        const rate = ((current - past) / past) * 100;
+        const color = rate > 0 ? 'text-green-600' : rate < 0 ? 'text-red-600' : 'text-slate-500';
+        return (
+          <span key={key} className="text-slate-500" title={`${label}の株価 ${fmt(past)}`}>
+            {label}比{' '}
+            <span className={`font-semibold ${color}`}>
+              {rate >= 0 ? '+' : ''}
+              {rate.toFixed(1)}%
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function StockList() {
   const [dividends, setDividends] = useState<DividendRecord[]>([]);
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -101,12 +145,16 @@ export default function StockList() {
   // Handle Refresh
   const handleRefreshAll = async () => {
     setRefreshing(true);
-    setRefreshMsg('最新配当金状況を取得・更新中...');
+    setRefreshMsg('最新株価・配当金状況を取得・更新中...');
     try {
       const res = await fetch('/api/stocks/refresh', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
-        setRefreshMsg(`完了！ ${data.count || 0}銘柄の配当金状況を更新しました。`);
+        setRefreshMsg(
+          data.price_error
+            ? `配当金状況は${data.count || 0}銘柄更新しましたが、株価の保存に失敗しました（supabase/stock_prices.sql を実行済みか確認してください）: ${data.price_error}`
+            : `完了！ ${data.count || 0}銘柄の株価・配当金状況を更新しました。`
+        );
         await loadData();
       } else {
         setRefreshMsg(`更新エラー: ${data.error || '不明なエラー'}`);
@@ -207,7 +255,7 @@ export default function StockList() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">保有銘柄一覧</h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            配当金状況最終更新日時: {lastUpdateStr}
+            株価・配当金状況最終更新日時: {lastUpdateStr}
           </p>
         </div>
 
@@ -219,7 +267,7 @@ export default function StockList() {
             className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 text-blue-600 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>{refreshing ? '更新中...' : '最新配当金状況を更新'}</span>
+            <span>{refreshing ? '更新中...' : '最新株価情報を更新'}</span>
           </button>
 
           <button
@@ -312,6 +360,7 @@ export default function StockList() {
                       <div className="text-xs text-slate-500 mt-0.5">
                         配当履歴: {stock.records.length}件
                       </div>
+                      <PriceTrend stock={stocks.find((s) => s.ticker_code === stock.ticker_code)} currency={stock.currency} />
                     </div>
                   </div>
 

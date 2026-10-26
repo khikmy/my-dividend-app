@@ -6,6 +6,12 @@ export interface Stock {
   last_check_color?: string | null;
   last_check_info?: string | null;
   updated_at?: string | null;
+  price_current?: number | null;
+  price_1m?: number | null;
+  price_3m?: number | null;
+  price_6m?: number | null;
+  price_1y?: number | null;
+  price_updated_at?: string | null;
 }
 
 /** 証券会社1社分の月次配当(取込結果)。税引き後=net、税引き前=gross(円) */
