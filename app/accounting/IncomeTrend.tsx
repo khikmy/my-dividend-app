@@ -43,10 +43,10 @@ function monthlyOf(rows: JournalRow[], year: number): Monthly {
     const k = subKey(r.credit_account, r.credit_sub);
     settleTotal.set(k, (settleTotal.get(k) ?? 0) + Number(r.credit_amount));
   }
-  // 按分した取引(旧方式で事業主貸の行を持つものを除く)の月別の金額
+  // 同じ経費科目・補助科目の取引(旧方式で事業主貸の行を持つものを除く)の月別の金額。按分済みの印がない過去年分も対象
   const baseByMonth = new Map<string, number[]>();
   for (const r of inYear) {
-    if (!r.split_done || !r.debit_account || r.entry_date.slice(5) === '12-31' || hasLegacyMate(r)) continue;
+    if (!r.debit_account || r.entry_date.slice(5) === '12-31' || hasLegacyMate(r)) continue;
     const k = subKey(r.debit_account, r.debit_sub);
     if (!settleTotal.has(k)) continue;
     const arr = baseByMonth.get(k) ?? Array(12).fill(0);
