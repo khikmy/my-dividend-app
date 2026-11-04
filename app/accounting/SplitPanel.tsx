@@ -37,10 +37,13 @@ export default function SplitPanel({
       .map((r) => {
         const ratio = householdRatio(r, ratioOf)!;
         // この画面で按分したものは、同じ取引内の事業主貸の行が家事分
-        const personal = rows
-          .filter((x) => x.group_id === r.group_id && x.id !== r.id && x.debit_account === OWNER_DRAW)
-          .reduce((t, x) => t + x.debit_amount, 0);
-        return { r, ratio, personal };
+        const legacy = rows.filter((x) => x.group_id === r.group_id && x.id !== r.id && x.debit_account === OWNER_DRAW);
+        const personal = legacy.length
+          ? legacy.reduce((t, x) => t + x.debit_amount, 0)
+          : r.debit_amount - Math.round((r.debit_amount * ratio) / 100); // 決算整理仕訳に加算済み(元の仕訳は減額しない)
+        // 旧方式は元の仕訳が経費分に減額済み。新方式は減額しないので、全額から家事分を引く
+        const business = legacy.length ? r.debit_amount : r.debit_amount - personal;
+        return { r, ratio, personal, business };
       });
     return { pending, done };
   }, [rows, year, ratioOf]);
@@ -58,33 +61,69 @@ export default function SplitPanel({
 
   const runSplit = async () => {
     if (targets.length === 0) return;
-    if (!confirm(`${targets.length}件の家事按分を実行します。経費分に減額し、残りを${OWNER_DRAW}に振り替えます。`)) return;
+    if (!confirm(`${targets.length}件の家事按分を実行します。家事分は、年末(12/31)の「${OWNER_DRAW} / 経費科目」の決算整理仕訳に加算します。`)) return;
     setRunning(true);
     setMsg(null);
     let count = 0;
+    // 家事分を(経費科目・補助科目)ごとに集計し、12/31の決算整理仕訳1件に加算する
+    const totals = new Map<string, { account: string; sub: string | null; amount: number }>();
     for (const { r, sp } of targets) {
-      // 元の行を経費分に減額して按分済みにし、残りを事業主貸として同じ取引に追加する
-      const { error } = await supabase
-        .from('journal_entries')
-        .update({ debit_amount: sp.business, credit_amount: sp.business, split_done: true })
-        .eq('id', r.id);
-      const { error: addError } = error
-        ? { error }
+      const key = `${r.debit_account}\t${r.debit_sub ?? ''}`;
+      const t = totals.get(key) ?? { account: r.debit_account!, sub: r.debit_sub ?? null, amount: 0 };
+      t.amount += sp.personal;
+      totals.set(key, t);
+    }
+    const settleDate = `${year}-12-31`;
+    for (const t of totals.values()) {
+      const existing = rows.find(
+        (x) =>
+          x.entry_date === settleDate &&
+          x.debit_account === OWNER_DRAW &&
+          x.credit_account === t.account &&
+          (x.credit_sub ?? null) === t.sub &&
+          x.id != null
+      );
+      // 既存レコードが借方行・貸方行の2行(一覧で統合表示)の場合も、両方の金額を更新する
+      const ids = [existing?.id, existing?.mate_id].filter((v): v is number => v != null);
+      const { error } = existing
+        ? await (async () => {
+            const d = await supabase
+              .from('journal_entries')
+              .update({ debit_amount: Number(existing.debit_amount) + t.amount })
+              .in('id', ids)
+              .not('debit_account', 'is', null);
+            if (d.error) return d;
+            return supabase
+              .from('journal_entries')
+              .update({ credit_amount: Number(existing.credit_amount) + t.amount })
+              .in('id', ids)
+              .not('credit_account', 'is', null);
+          })()
         : await supabase.from('journal_entries').insert({
-            group_id: r.group_id,
-            entry_date: r.entry_date,
-            description: r.description,
+            group_id: crypto.randomUUID(),
+            entry_date: settleDate,
+            description: '家事按分',
             debit_account: OWNER_DRAW,
             debit_sub: null,
-            debit_amount: sp.personal,
-            credit_account: r.credit_account,
-            credit_sub: r.credit_sub ?? null,
-            credit_amount: sp.personal,
+            debit_amount: t.amount,
+            credit_account: t.account,
+            credit_sub: t.sub,
+            credit_amount: t.amount,
             kind: 'normal',
           });
-      if (addError) {
+      if (error) {
         setRunning(false);
-        setMsg({ ok: false, text: `${count}件を按分したところで失敗しました: ${addError.message}` });
+        setMsg({ ok: false, text: `決算整理仕訳の更新に失敗しました: ${error.message}` });
+        onChanged();
+        return;
+      }
+    }
+    // 元の仕訳は減額せず、按分済みにするだけ(経費は決算整理の貸方で減る)
+    for (const { r } of targets) {
+      const { error } = await supabase.from('journal_entries').update({ split_done: true }).eq('id', r.id);
+      if (error) {
+        setRunning(false);
+        setMsg({ ok: false, text: `${count}件を按分済みにしたところで失敗しました: ${error.message}` });
         onChanged();
         return;
       }
@@ -174,13 +213,13 @@ export default function SplitPanel({
               </tr>
             </thead>
             <tbody>
-              {done.map(({ r, ratio, personal }) => (
+              {done.map(({ r, ratio, personal, business }) => (
                 <tr key={r.id}>
                   <td className={`${td} whitespace-nowrap`}>{r.entry_date.replace(/-/g, '/')}</td>
                   <td className={td}>{r.description}</td>
                   <td className={td}>{label(r.debit_account, r.debit_sub)}</td>
                   <td className={`${td} text-right tabular-nums`}>{ratio}%</td>
-                  <td className={`${td} text-right tabular-nums`}>{yen(r.debit_amount)}</td>
+                  <td className={`${td} text-right tabular-nums`}>{yen(business)}</td>
                   <td className={`${td} text-right tabular-nums`}>{personal > 0 ? yen(personal) : '—'}</td>
                 </tr>
               ))}
