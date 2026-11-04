@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { Bar, CartesianGrid, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { JournalRow, accountType, yen } from '@/lib/accounting';
+import { JournalRow, OWNER_DRAW, accountType, yen } from '@/lib/accounting';
 
 // 年ごとの色: 今年=緑、前年=青、前々年=オレンジ。棒は濃い色が控除前所得、薄い色が経費(同じ色の濃淡)
 const YEAR_STYLE = [
@@ -25,9 +25,48 @@ interface Monthly {
 function monthlyOf(rows: JournalRow[], year: number): Monthly {
   const revenue = Array(12).fill(0);
   const expense = Array(12).fill(0);
-  for (const r of rows) {
-    if (Number(r.entry_date.slice(0, 4)) !== year) continue;
-    const m = Number(r.entry_date.slice(5, 7)) - 1;
+  const now = new Date();
+  // 今年は当月までしか表示しないので、先の月(12/31の決算整理など)は最後に表示する月に含め、損益計算書と合わせる
+  const lastShown = year === now.getFullYear() ? now.getMonth() : 11;
+  const monthOf = (r: JournalRow) => Math.min(Number(r.entry_date.slice(5, 7)) - 1, lastShown);
+  const inYear = rows.filter((r) => Number(r.entry_date.slice(0, 4)) === year);
+
+  // 家事按分の決算整理(12/31 借方 事業主貸 / 貸方 経費科目)は、12月にまとめて引かず、
+  // 按分した各取引の月へ、その取引の金額に比例して割り振る(合計は損益計算書と一致する)
+  const subKey = (a: string | null, s?: string | null) => `${a}\t${s ?? ''}`;
+  const hasLegacyMate = (r: JournalRow) =>
+    inYear.some((x) => x.group_id === r.group_id && x.id !== r.id && x.debit_account === OWNER_DRAW);
+  const isSettleCredit = (r: JournalRow) =>
+    r.entry_date.slice(5) === '12-31' && r.debit_account === OWNER_DRAW && !!r.credit_account && accountType(r.credit_account) === 'expense';
+  const settleTotal = new Map<string, number>();
+  for (const r of inYear.filter(isSettleCredit)) {
+    const k = subKey(r.credit_account, r.credit_sub);
+    settleTotal.set(k, (settleTotal.get(k) ?? 0) + Number(r.credit_amount));
+  }
+  // 按分した取引(旧方式で事業主貸の行を持つものを除く)の月別の金額
+  const baseByMonth = new Map<string, number[]>();
+  for (const r of inYear) {
+    if (!r.split_done || !r.debit_account || r.entry_date.slice(5) === '12-31' || hasLegacyMate(r)) continue;
+    const k = subKey(r.debit_account, r.debit_sub);
+    if (!settleTotal.has(k)) continue;
+    const arr = baseByMonth.get(k) ?? Array(12).fill(0);
+    arr[monthOf(r)] += Number(r.debit_amount);
+    baseByMonth.set(k, arr);
+  }
+  const allocated = new Set<string>();
+  for (const [k, arr] of baseByMonth) {
+    const base = arr.reduce((a, b) => a + b, 0);
+    if (base <= 0) continue;
+    allocated.add(k);
+    arr.forEach((v, i) => (expense[i] -= (settleTotal.get(k)! * v) / base));
+  }
+
+  for (const r of inYear) {
+    const m = monthOf(r);
+    if (isSettleCredit(r) && allocated.has(subKey(r.credit_account, r.credit_sub))) {
+      // 貸方(経費の減額)は上で月別に割り振り済み
+      continue;
+    }
     if (r.debit_account) {
       const t = accountType(r.debit_account);
       if (t === 'expense') expense[m] += Number(r.debit_amount);
