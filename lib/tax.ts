@@ -137,14 +137,11 @@ export function calculateTax(params: TaxCalculationParams): TaxCalculationResult
     (div_jpy_tokutei + div_usd_jpy_tokutei * 0.9) * 0.15315
   );
 
-  // 最終的な精算額（マイナスは還付）
+  // 最終的な精算額（マイナスは還付）。納付額は100円未満切り捨て、還付額は1円単位
+  const final_tax_raw =
+    total_income_tax_with_reconstruction - foreign_tax_credit - withholding_tax;
   const final_tax_amount =
-    Math.round(
-      (total_income_tax_with_reconstruction -
-        foreign_tax_credit -
-        withholding_tax) /
-        100
-    ) * 100;
+    final_tax_raw >= 0 ? Math.floor(final_tax_raw / 100) * 100 : final_tax_raw;
 
   // 住民税の計算
   const residence_total_deductions =
@@ -186,20 +183,33 @@ export function calculateTax(params: TaxCalculationParams): TaxCalculationResult
     furusato_residence_deduction = furusato_basic + Math.max(0, furusato_special);
   }
 
-  const residence_income_tax_final = Math.max(
+  // 住民税の外国税額控除: 所得税の控除限度額を超えた外国税(米国源泉)は、所得税の限度額の30%(道府県12%+市町村18%)まで住民税から引ける
+  const foreign_excess = Math.max(0, foreign_withholding_tax - foreign_tax_credit);
+  const residence_foreign_limit =
+    total_income > 0 ? Math.floor(standard_tax * (div_usd_jpy_tokutei / total_income) * 0.3) : 0;
+  const after_furusato = Math.max(
     0,
-    residence_income -
-      adjustment_deduction -
-      residence_dividend_deduction -
-      furusato_residence_deduction -
-      dividend_wari_credit
+    residence_income - adjustment_deduction - residence_dividend_deduction - furusato_residence_deduction
   );
-  const residence_tax = Math.round((residence_income_tax_final + 5000) / 100) * 100;
+  const residence_foreign_credit = Math.min(foreign_excess, residence_foreign_limit, after_furusato);
+  const after_foreign = after_furusato - residence_foreign_credit;
+
+  // 配当割額控除は外国税額控除のあとに引く。引ききれない分は均等割に充当し、なお余れば還付される(税額がマイナス=還付)
+  const wari_applied = Math.min(dividend_wari_credit, after_foreign);
+  const wari_surplus = dividend_wari_credit - wari_applied;
+  const residence_income_tax_final = Math.floor((after_foreign - wari_applied) / 100) * 100;
+  // 均等割5,000円(都民税1,500円+区民税3,500円)+森林環境税1,000円(令和6年度から)
+  const residence_per_capita = 6000;
+  const residence_tax = residence_income_tax_final + residence_per_capita - wari_surplus;
 
   // 消費税。令和8年分までは2割特例(売上税額の20%=税抜売上の2%)。令和7年分の申告書(納付151,900円)と一致を確認済み。
   // 令和9年分からは2割特例がないため、簡易課税の第5種(みなし仕入率50%: 税抜売上の10%×50%=5%)で見積もる(要・届出)
-  const consumption_rate = year <= 2026 ? 0.02 : 0.05;
-  const consumption_tax = Math.round(((sales / 1.1) * consumption_rate) / 100) * 100;
+  // 申告書と同じ手順: 課税標準額(税抜売上・1,000円未満切捨)×7.8%×納付割合 → 国税を100円未満切捨 → 地方消費税(国税×22/78)を100円未満切捨
+  const consumption_ratio = year <= 2026 ? 0.2 : 0.5;
+  const taxable_sales = Math.floor(sales / 1.1 / 1000) * 1000;
+  const consumption_national = Math.floor((taxable_sales * 0.078 * consumption_ratio) / 100) * 100;
+  const consumption_local = Math.floor(((consumption_national * 22) / 78) / 100) * 100;
+  const consumption_tax = consumption_national + consumption_local;
 
   // ふるさと納税限度額: 住民税所得割額の20%まで特例控除が受けられる前提で、寄附金控除を引く前の限界税率から逆算する
   const denominator = 0.9 - marginalRate(Math.floor(taxable_before_donation / 1000) * 1000) * 1.021;
