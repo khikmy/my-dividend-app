@@ -397,9 +397,18 @@ export default function TaxSimulation() {
             <span className="text-xs text-slate-500 font-medium block">
               住民税（次年度分）
             </span>
-            <span className="text-2xl font-bold text-slate-900 block mt-1">
+            <span
+              className={`text-2xl font-bold block mt-1 ${
+                taxResult.residence_tax < 0 ? 'text-emerald-600' : 'text-slate-900'
+              }`}
+            >
               ¥ {taxResult.residence_tax.toLocaleString()}
             </span>
+            {taxResult.residence_tax < 0 && (
+              <span className="text-xs text-slate-400 mt-0.5 block">
+                ※配当割の控除しきれない分が還付される見込みです
+              </span>
+            )}
           </div>
 
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60">
