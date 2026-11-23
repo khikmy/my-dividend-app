@@ -464,7 +464,20 @@ export default function BudgetPage() {
 
               {REGIONS.map((region) => {
                 const regionItems = expenseData.items.filter((i) => i.region === region);
-                const visibleItems = expenseEditMode ? regionItems : regionItems.filter((i) => !i.isDefault);
+                // 参照画面では現金の出金/入金を1行(出金−入金)にまとめる。編集画面では分けて入力する。
+                const viewItems = expenseEditMode
+                  ? regionItems
+                  : regionItems.flatMap((i) => {
+                      if (i.label === '現金入金') return [];
+                      if (i.label !== '現金') return [i];
+                      const dep = regionItems.find((d) => d.label === '現金入金');
+                      if (!dep) return [i];
+                      const depAmount = dep.isDefault ? 0 : dep.amount;
+                      const amount = i.amount - depAmount;
+                      const budget = i.budget - dep.budget;
+                      return [{ ...i, displayLabel: '現金', amount, budget, balance: budget - amount, isDefault: i.isDefault && dep.isDefault }];
+                    });
+                const visibleItems = expenseEditMode ? viewItems : viewItems.filter((i) => !i.isDefault);
 
                 const totalSourceItems = regionItems.filter((i) => !i.isDefault);
                 let totalExpense: number, totalBudget: number;
@@ -476,11 +489,12 @@ export default function BudgetPage() {
                   totalExpense = Number(w ? w.amount : 0) - Number(dep ? dep.amount : 0);
                   totalBudget = Number(wBudget ? wBudget.budget : 0) - Number(depBudget ? depBudget.budget : 0);
                 } else {
-                  totalExpense = totalSourceItems.reduce((s, i) => s + Number(i.amount), 0);
-                  totalBudget = regionItems.reduce((s, i) => s + Number(i.budget), 0);
+                  // 現金の入金など sign=-1 の項目は合計から差し引く
+                  totalExpense = totalSourceItems.reduce((s, i) => s + i.sign * Number(i.amount), 0);
+                  totalBudget = regionItems.reduce((s, i) => s + i.sign * Number(i.budget), 0);
                 }
                 const totalBalance = region === '共有口座' ? totalExpense - totalBudget : totalBudget - totalExpense;
-                const totalLabel =region === '共有口座' ? '合計(支出-入金)' : '合計';
+                const totalLabel = region === '共有口座' ? '合計(支出-入金)' : '合計';
 
                 return (
                   <div key={region}>
@@ -520,7 +534,7 @@ export default function BudgetPage() {
                             : item.balance;
                           return (
                             <tr key={key} className="border-t border-slate-100">
-                              <td className="py-2 font-semibold text-slate-700">{item.label}</td>
+                              <td className="py-2 font-semibold text-slate-700">{item.displayLabel}</td>
                               <td className="py-2 text-right">
                                 {expenseEditMode ? (
                                   <input
