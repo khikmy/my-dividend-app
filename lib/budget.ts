@@ -8,7 +8,16 @@ export interface Category {
   match?: string;
   // 指定した月(含む)まで表示する。省略時は常に表示。過去月のデータは残したまま新しい月だけ非表示にできる。
   lastMonthKey?: string;
+  // 指定した月(含む)から表示する。省略時は最初から表示。
+  firstMonthKey?: string;
+  // 画面に表示する名前(DB上のlabelと異なる場合)。
+  displayLabel?: string;
+  // 合計への加算の向き。-1なら合計から差し引く(現金の入金)。省略時は+1。
+  sign?: 1 | -1;
 }
+
+// 現金を入金/出金に分けて入力し始める月。これより前は「現金」の実績を出金として扱い、入金は0円。
+export const CASH_SPLIT_START_MONTH_KEY = '2026-11';
 
 export const CATEGORIES: Category[] = [
   { region: '引き落とし金額', label: '奨学金' },
@@ -18,7 +27,9 @@ export const CATEGORIES: Category[] = [
   { region: '引き落とし金額', label: 'NLカード' },
   { region: '引き落とし金額', label: 'エポスカード' },
   { region: '引き落とし金額', label: '税金等' },
-  { region: '引き落とし金額', label: '現金' },
+  // DB上のlabel「現金」は従来どおり出金として扱う(過去データの移行不要)
+  { region: '引き落とし金額', label: '現金', displayLabel: '現金(出金)' },
+  { region: '引き落とし金額', label: '現金入金', displayLabel: '現金(入金)', firstMonthKey: CASH_SPLIT_START_MONTH_KEY, sign: -1 },
   { region: '投資・貯金額', label: 'NISA積立投資' },
   { region: '投資・貯金額', label: 'iDeCo' },
   { region: '投資・貯金額', label: '個別株' },
@@ -28,7 +39,9 @@ export const CATEGORIES: Category[] = [
 ];
 
 export function categoriesForMonth(monthKey: string): Category[] {
-  return CATEGORIES.filter((c) => !c.lastMonthKey || monthKey <= c.lastMonthKey);
+  return CATEGORIES.filter(
+    (c) => (!c.lastMonthKey || monthKey <= c.lastMonthKey) && (!c.firstMonthKey || monthKey >= c.firstMonthKey)
+  );
 }
 
 export const REGIONS =['引き落とし金額', '投資・貯金額', '共有口座'] as const;
@@ -315,6 +328,8 @@ export function buildBudgetTabData(
 export interface ExpenseTabItem {
   region: string;
   label: string;
+  displayLabel: string;
+  sign: 1 | -1;
   amount: number;
   budget: number;
   balance: number;
@@ -350,9 +365,12 @@ export function buildExpenseTabData(
     return {
       region: cat.region,
       label: cat.label,
+      displayLabel: cat.displayLabel ?? cat.label,
+      sign: cat.sign ?? 1,
       amount,
       budget: budgetAmount,
-      balance: budgetAmount - amount,
+      // 入金(sign=-1)は実績が予算を上回るほど良いので、収支の符号を逆にする
+      balance: cat.sign === -1 ? amount - budgetAmount : budgetAmount - amount,
       isDefault: !hasRow,
     };
   });
@@ -466,7 +484,7 @@ export interface MonthTotals {
   income: number;
   totalExpense: number;
   totalBudget: number;
-  items: { region: string; label: string; amount: number; budget: number; isDefault: boolean }[];
+  items: { region: string; label: string; sign: 1 | -1; amount: number; budget: number; isDefault: boolean }[];
 }
 
 function computeMonthTotals(
@@ -525,6 +543,7 @@ function computeMonthTotals(
     return {
       region: cat.region,
       label: cat.label,
+      sign: cat.sign ?? 1,
       amount: m ? Number(m.amount) : budgetAmount,
       budget: budgetAmount,
       isDefault: !m,
@@ -537,7 +556,9 @@ function computeMonthTotals(
     return items.filter(filterFn).reduce((s, i) => s + i[field], 0);
   }
   function calcTotal(field: 'amount' | 'budget'): number {
-    const withdrawTotal = sumBy(field, (i) => i.region === '引き落とし金額');
+    const withdrawTotal = items
+      .filter((i) => i.region === '引き落とし金額')
+      .reduce((s, i) => s + i.sign * i[field], 0);
     const investTotal = sumBy(field, (i) => i.region === '投資・貯金額' && i.label !== 'NISA積立投資');
     const sharedDeposit = items.find((i) => i.region === '共有口座' && i.label === '入金額');
     const sharedWithdraw = items.find((i) => i.region === '共有口座' && i.label === '支出額');
