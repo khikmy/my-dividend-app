@@ -363,15 +363,15 @@ export default function BudgetPage() {
                       {poolTrend.some((p) => p.isSelected) && (
                         <ReferenceLine
                           x={poolTrend.find((p) => p.isSelected)?.label}
-                          stroke="#dc2626"
+                          stroke="#e0554a"
                           strokeDasharray="4 4"
-                          label={{ value: '対象月', position: 'top', fill: '#dc2626', fontSize: 11, fontWeight: 700 }}
+                          label={{ value: '対象月', position: 'top', fill: '#e0554a', fontSize: 11, fontWeight: 700 }}
                         />
                       )}
                       <Line
                         type="monotone"
                         dataKey="poolTotal"
-                        stroke="#2563eb"
+                        stroke="#4a68c4"
                         strokeWidth={2}
                         dot={<PoolTrendDot />}
                         activeDot={{ r: 6 }}
@@ -602,7 +602,7 @@ export default function BudgetPage() {
               {trendModalLabel && (() => {
                 const label = trendModalLabel;
                 const idx = TREND_CARD_LABELS.indexOf(label);
-                const color = ['#2563eb', '#16a34a', '#f59e0b', '#9333ea'][idx] ?? '#2563eb';
+                const color = ['#4a68c4', '#2f9e6b', '#c08f17', '#9b7bd4'][idx] ?? '#4a68c4';
                 const median = cardTrend.medians[label];
                 return (
                   <div
@@ -691,10 +691,10 @@ function PoolTrendDot(props: any) {
   if (payload?.isSelected) {
     return (
       <g>
-        <circle cx={cx} cy={cy} r={9} fill="#dc2626" fillOpacity={0.15} />
-        <circle cx={cx} cy={cy} r={5} fill="#dc2626" stroke="#fff" strokeWidth={2} />
+        <circle cx={cx} cy={cy} r={9} fill="#e0554a" fillOpacity={0.15} />
+        <circle cx={cx} cy={cy} r={5} fill="#e0554a" stroke="#fff" strokeWidth={2} />
       </g>
     );
   }
-  return <circle cx={cx} cy={cy} r={3} fill="#2563eb" />;
+  return <circle cx={cx} cy={cy} r={3} fill="#4a68c4" />;
 }

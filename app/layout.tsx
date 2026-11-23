@@ -14,16 +14,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased flex flex-col">
+      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased lg:flex">
         <Navbar />
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-          {children}
-        </main>
-        <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
-          © {new Date().getFullYear()} 資産管理アプリ
-        </footer>
+        <div className="flex-1 min-w-0 flex flex-col min-h-screen">
+          <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+            {children}
+          </main>
+          <footer className="border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+            © {new Date().getFullYear()} 資産管理アプリ
+          </footer>
+        </div>
       </body>
     </html>
   );
 }
-

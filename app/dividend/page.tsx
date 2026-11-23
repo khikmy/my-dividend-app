@@ -26,9 +26,9 @@ import StockList from '@/components/StockList';
 import DividendImport from '@/components/DividendImport';
 
 const COLORS = [
-  '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#0d9488',
-  '#14b8a6', '#2dd4bf', '#f59e0b', '#fbbf24', '#ec4899',
-  '#8b5cf6', '#6366f1', '#10b981', '#64748b'
+  '#4a68c4', '#e0654f', '#2f9e6b', '#c08f17', '#a3b3e6',
+  '#9b7bd4', '#4f9aa0', '#a0693a', '#6b7f3a', '#d98a7a',
+  '#5b5f97', '#8d958f', '#2d6a6a', '#b0a15a'
 ];
 
 export default function DashboardPage() {
@@ -443,7 +443,7 @@ export default function DashboardPage() {
                       key={y}
                       dataKey={`y${y}`}
                       name={`${y}年`}
-                      fill={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
+                      fill={['#cbd5e1', '#a3b3e6', '#4a68c4'][i]}
                       radius={[4, 4, 0, 0]}
                     />
                   ))}
@@ -488,7 +488,7 @@ export default function DashboardPage() {
                       type="monotone"
                       dataKey={`y${y}`}
                       name={`${y}年`}
-                      stroke={['#cbd5e1', '#60a5fa', '#2563eb'][i]}
+                      stroke={['#cbd5e1', '#a3b3e6', '#4a68c4'][i]}
                       strokeWidth={i === 2 ? 3 : 2}
                       dot={{ r: 3 }}
                       connectNulls={false}
