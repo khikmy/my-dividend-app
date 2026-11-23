@@ -22,9 +22,9 @@ import ForexModal from '@/components/ForexModal';
 import ConfirmModal from '@/components/ConfirmModal';
 
 const COLORS = [
-  '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#0d9488',
-  '#14b8a6', '#2dd4bf', '#f59e0b', '#fbbf24', '#ec4899',
-  '#8b5cf6', '#6366f1', '#10b981', '#64748b'
+  '#4a68c4', '#e0654f', '#2f9e6b', '#c08f17', '#a3b3e6',
+  '#9b7bd4', '#4f9aa0', '#a0693a', '#6b7f3a', '#d98a7a',
+  '#5b5f97', '#8d958f', '#2d6a6a', '#b0a15a'
 ];
 const PIE_TOP_N = 10;
 
@@ -316,7 +316,7 @@ export default function ForexPage() {
           <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <span className="text-xs font-semibold text-slate-400 block">外貨資産総額 (円換算)</span>
-              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5 block">
+              <span className="text-2xl sm:text-2xl font-bold text-slate-800 mt-0.5 block">
                 ¥ {totalJpy.toLocaleString()}
               </span>
             </div>

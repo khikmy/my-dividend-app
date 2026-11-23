@@ -6,11 +6,11 @@ import { JournalRow, OWNER_DRAW, accountType, yen } from '@/lib/accounting';
 
 // 年ごとの色: 今年=緑、前年=青、前々年=オレンジ。棒は濃い色が控除前所得、薄い色が経費(同じ色の濃淡)
 const YEAR_STYLE = [
-  { color: '#008300', tint: '#9ad09a', dashed: undefined as string | undefined },
-  { color: '#2a78d6', tint: '#a9c9f0', dashed: '6 4' },
-  { color: '#eb6834', tint: '#f7c3ad', dashed: '2 4' },
+  { color: '#2f9e6b', tint: '#a6cdb5', dashed: undefined as string | undefined },
+  { color: '#6f87d6', tint: '#b2c7d8', dashed: '6 4' },
+  { color: '#e0654f', tint: '#eebcad', dashed: '2 4' },
 ];
-const OVER = '#b91c1c'; // 経費が売上高を超えた分(赤字)
+const OVER = '#c03d33'; // 経費が売上高を超えた分(赤字)
 const INK = '#0f172a';
 const INK_2 = '#64748b';
 
